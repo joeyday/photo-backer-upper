@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photo-backer-upper"
+version = "0.1.0"
+description = "Back up iCloud Photos to a NAS and external drive, organized by date."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+pback = "photo_backer_upper.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
