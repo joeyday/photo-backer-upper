@@ -118,6 +118,11 @@ def check_free_space(rsync_cmd: list, dest: Path) -> None:
 
 # --- launchd agent ---------------------------------------------------------------------
 
+def launcher_executable() -> Path:
+    return (Path.home() / "Applications" / "Photo Backer Upper.app" / "Contents" / "MacOS"
+            / "PhotoBackerUpper")
+
+
 def agent_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{AGENT_LABEL}.plist"
 
@@ -140,9 +145,20 @@ def build_agent_plist(pback: str, log_dir: Path, every_hours: float) -> dict:
 
 
 def install_agent(state_dir: Path, every_hours: float, load: bool) -> int:
-    pback = shutil.which("pback")
-    if not pback:
+    if not shutil.which("pback"):
         raise ConfigError("'pback' is not on PATH; install it first with: uv tool install .")
+    # The agent runs the signed launcher app, so macOS privacy grants (Photos, network
+    # volumes) belong to that app alone and not to a shared Python interpreter.
+    launcher = launcher_executable()
+    if not launcher.exists():
+        raise ConfigError(f"launcher app not found at {launcher}; build it first with: "
+                          "SIGN_IDENTITY=<identity> sh launcher/build.sh, then open it once "
+                          "in Finder to grant Photos access")
+    # launchd doesn't read ~/.zshrc, so the settings must be in the config file.
+    if not config.file_values().get("PHOTO_BACKER_UPPER_MAIN_DIR"):
+        raise ConfigError(f"PHOTO_BACKER_UPPER_MAIN_DIR is not set in {config.config_path()}; "
+                          "scheduled runs can't see ~/.zshrc, so put your settings in that file")
+    pback = str(launcher)
     log_dir = state_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     path = agent_plist_path()

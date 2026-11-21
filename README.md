@@ -90,9 +90,20 @@ Items whose originals can't be downloaded are reported as "missing" and skipped;
 
 ## Automation
 
+Scheduled runs need two things first:
+
+1. **A config file.** launchd doesn't read `~/.zshrc`, so put at least `PHOTO_BACKER_UPPER_MAIN_DIR` (and `PHOTO_BACKER_UPPER_NAS_URL` if you want auto-mount) in `~/.config/photo-backer-upper/config`. `install-agent` refuses to run without it.
+2. **The launcher app.** macOS privacy permissions attach to the program that runs, and `pback` is a script, so granting them would mean granting them to the whole Python interpreter. Instead a tiny signed app runs `pback`, and only that app gets the permissions.
+
 ```sh
-pback install-agent --every-hours 6 --load   # launchd agent: `pback export --notify` at login and every 6 hours
+SIGN_IDENTITY="<your signing identity>" sh launcher/build.sh   # builds ~/Applications/Photo Backer Upper.app
+```
+
+Then open the app once in Finder: it asks for Photos access ("All Photos") and runs `pback export --dry-run`. Allow the network volume prompt too. Find your identity with `security find-identity -v -p codesigning`; with no `SIGN_IDENTITY` it signs ad hoc, and macOS will ask for the permissions again after every rebuild.
+
+```sh
+pback install-agent --every-hours 6 --load   # launchd agent: runs the launcher with `export --notify` at login and every 6 hours
 pback uninstall-agent
 ```
 
-The agent writes its log to `logs/export.log` in the state directory and shows a notification if a run fails. Only one `export`/`mirror` runs at a time, so a scheduled run that overlaps a long one exits quietly. If the NAS isn't mounted and `PHOTO_BACKER_UPPER_NAS_URL` is set, it mounts it first; otherwise the run is skipped with an error. Settings come from the config file, not `~/.zshrc`. The Mac must be awake and logged in, and the executable running the job needs Photos access ("All Photos") and Full Disk Access in System Settings, privacy and security. The mirror is deliberately not scheduled.
+The agent writes its log to `logs/export.log` in the state directory and shows a notification if a run fails. Only one `export`/`mirror` runs at a time, so a scheduled run that overlaps a long one exits quietly. If the NAS isn't mounted and `PHOTO_BACKER_UPPER_NAS_URL` is set, it mounts it first; otherwise the run is skipped with an error. Settings come from the config file, not `~/.zshrc`. The Mac must be awake and logged in, and the launcher app needs Photos access ("All Photos") and access to network volumes in System Settings, privacy and security (Full Disk Access only if a run turns out to need it). The mirror is deliberately not scheduled.

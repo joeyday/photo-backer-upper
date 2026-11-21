@@ -38,6 +38,11 @@ def _file_values() -> dict:
     return values
 
 
+def file_values() -> dict:
+    """Settings from the config file only (what a launchd run sees)."""
+    return _file_values()
+
+
 def get(name: str, default=None):
     value = os.environ.get(name)
     if value:

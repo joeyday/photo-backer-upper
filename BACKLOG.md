@@ -7,6 +7,7 @@ Not part of the MVP.
 - **launchd automation**: `pback install-agent` is written (scheduled `export`, NAS auto-mount, lock, notifications) but not yet tested under launchd; macOS privacy permissions (Photos, Full Disk Access) for the launchd-run executable are the open risk. Still to do: `mirror` when the secondary drive mounts (`StartOnMount`), never with `--delete` unattended.
 - **Bigger secondary drive.** The archive (about 2.1 TiB) no longer fits the 1 TB external drive; `mirror` refuses to start. Mirror stays off until a larger drive is in place.
 - **Missing originals.** A few library items (3 videos, 9 edited Live Photos) never download; export reports them as missing and retries each run.
+- **Export re-downloads already-archived items.** A full `export` on 2026-11-20 took 24 minutes (the dry-run took 2) and finished with 1 exported, 11,706 skipped and 9 missing. The dry-run had listed about 1,627 iCloud originals as "missing" that weren't in the reconcile skip list, and they appear to have been downloaded and then skipped. Find out why: Photos' "Optimize Mac Storage" evicting originals so every run re-fetches them, or osxphotos downloading before it checks `export.db`. Matters for scheduled run time and iCloud bandwidth.
 - **Wife's Mac**: run the same CLI there with its own local state, writing to the same main archive.
 - **Approximate-date videos** (UTC `CreateDate` only): `fix-dates` lists but doesn't rename them. Could resolve them by matching the library item and using its local time.
 
