@@ -62,7 +62,16 @@ pback reconcile
 
 `pback export` refuses to run into a folder that already has files until this has been done on that Mac.
 
-**5. Build the launcher app.** macOS privacy permissions attach to the program that runs. `pback` is a Python script, so a small signed app starts it and holds the permissions instead of your whole Python:
+**5. Install the launcher app.** macOS privacy permissions attach to the program that runs. `pback` is a Python script, so a small signed app starts it and holds the permissions instead of your whole Python.
+
+The simplest way is the notarized app from the [latest release](https://github.com/joeyday/photo-backer-upper/releases/latest). Download `PhotoBackerUpper.zip`, unzip it, and move `Photo Backer Upper.app` into `~/Applications`:
+
+```sh
+mkdir -p ~/Applications
+ditto ~/Downloads/"Photo Backer Upper.app" ~/Applications/"Photo Backer Upper.app"
+```
+
+Or build it from source:
 
 ```sh
 security find-identity -v -p codesigning        # find your signing identity
