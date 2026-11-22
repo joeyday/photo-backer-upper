@@ -1,67 +1,258 @@
 # Photo Backer Upper
 
-Automates backing up a family's iCloud Photos to a NAS and an external drive, with every file named by capture date/time and filed into `YYYY-MM` folders.
+`pback` backs up an iCloud Photos library to a folder on a NAS (the main archive) and, on request, mirrors that folder to a second drive. Every file is named by its capture time and filed into a month folder: `YYYY-MM/YYYY-MM-DD_HH-MM-SS.ext`. Several people's Macs can export into the same archive.
+
+It is a thin layer over three existing tools: [osxphotos](https://github.com/RhetTbull/osxphotos) does the export, `exiftool` reads dates out of files already in the archive, and `rsync` does the mirror.
 
 > Status: MVP in progress. See [BACKLOG.md](BACKLOG.md) for what's deferred.
 
-## The original (manual) process
+## Install (automatic backups on a Mac)
 
-1. Two people take photos on iPhones, which sync to iCloud Photos.
-2. Macs use "Optimize Mac Storage", so full-quality originals aren't guaranteed to be local. Before each backup, photos were dragged into a staging folder to force originals to download.
-3. An rsync script copied the staging folders to a Synology NAS.
-4. Hazel rules renamed each file using the date it was taken and moved it into a month folder. They ran `exiftool` with a fallback chain: `DateTimeOriginal`, then `CreateDate`, then `FileModifyDate` (prefixed `mod_`). Result: `YYYY-MM/YYYY-MM-DD_HH-MM-SS[-n].ext`.
-   - Known flaw: videos usually fell through to the date they were copied, not the date they were shot.
-5. After renaming and organizing, the NAS was mirrored to an external drive (always the last step).
-6. Google Drive's Mac app synced the folder for one more redundancy (no longer works; see backlog).
+Do these in order, on each Mac that backs up photos. You need macOS, [Homebrew](https://brew.sh), the Xcode command line tools, and the Photos library signed in to iCloud on that Mac. Scheduled runs only happen while the Mac is awake and you are logged in.
 
-## Target design
-
-- **Stateless**: each run works out what hasn't been backed up yet.
-- **No staging step**: export originals straight from the Photos library with [osxphotos](https://github.com/RhetTbull/osxphotos), downloading from iCloud as needed, using the library's true capture date (correct for videos too).
-- **Same end state**: files named `YYYY-MM-DD_HH-MM-SS.ext` in `YYYY-MM/` folders on the main archive (NAS) and the secondary archive (external drive). Everyone's photos mix in one tree.
-- **What's included**: everything in your library, including screenshots, but not items that were only "Shared with You" (Messages etc.) and never saved to the library.
-- **CLI with separate steps**: `export` (Photos to main), `mirror` (main to secondary, always last), `run` (both).
-- The mirror never deletes from the secondary unless you pass `--delete`.
-
-## Setup
+**0. Get the project files.**
 
 ```sh
-brew install exiftool
-uv tool install osxphotos   # osxphotos isn't in Homebrew; pipx install osxphotos also works
-uv tool install .           # installs the `pback` command from this repo
+xcode-select --install       # skip if already installed; includes git and the Swift compiler
+git clone https://github.com/joeyday/photo-backer-upper.git ~/Projects/photo-backer-upper
+cd ~/Projects/photo-backer-upper
 ```
 
-For `mirror`, also `brew install rsync`: macOS's built-in rsync is too old for the progress display.
+Every command below is run from that folder. To update later: `git pull`, then `uv tool install . --reinstall`.
 
-Settings are environment variables; nothing personal is hardcoded (see `.env.example`). Put them in `~/.zshrc`, or, for scheduled runs, in the config file `~/.config/photo-backer-upper/config` (same `KEY=VALUE` names), because launchd doesn't read `~/.zshrc`. Real environment variables win over the file.
+**1. Install the tools.**
 
 ```sh
-export PHOTO_BACKER_UPPER_MAIN_DIR="/Volumes/Main/Photos"
-export PHOTO_BACKER_UPPER_SECONDARY_DIR="/Volumes/Secondary/Photos"
-# optional: export PHOTO_BACKER_UPPER_NAS_URL="smb://user@nas/Share"   # auto-mount the NAS when it isn't mounted
-# optional: export PHOTO_BACKER_UPPER_LIBRARY="/path/to/Photos Library.photoslibrary"
-# optional: export PHOTO_BACKER_UPPER_STATE_DIR="$HOME/.local/state/photo-backer-upper"
+brew install exiftool uv rsync
+uv tool install osxphotos
+uv tool install .            # installs the `pback` command into ~/.local/bin
+uv tool update-shell         # puts ~/.local/bin on your PATH; open a new Terminal afterwards
 ```
 
-`PHOTO_BACKER_UPPER_NAS_URL` is mounted the way Finder's Connect to Server does, so connect once in Finder with "Remember this password in my keychain" ticked.
+`pback` must end up at `~/.local/bin/pback`, because the launcher app (step 5) looks for it there and nowhere else. `rsync` is only needed for `pback mirror`.
 
-## Usage
+**2. Connect the NAS once in Finder** (Go, Connect to Server, `smb://...`) and tick "Remember this password in my keychain". You can disconnect afterwards; `pback` reconnects when it needs to.
 
-**First, once per Mac:** if the main archive already has photos, run the reconcile so they aren't exported again as duplicates. It only reads the archive (nothing is modified, replaced or deleted) and saves a list of library photos already backed up. A photo counts as backed up only if an archive file has its capture-time name *and* agrees on camera model, sub-second capture time, aspect ratio (and, for videos, duration), because the archive holds several people's photos and two can share a capture second. Anything unconfirmed is exported instead (at worst a duplicate with a ` (1)` suffix, never a missing photo) and listed in `reconcile-unconfirmed.tsv` in the state directory. It needs `exiftool`. Run it on each Mac that exports (e.g. your partner's too); `export` refuses to run against a non-empty archive until it has been.
+**3. Create the config file.** Scheduled runs can't see `~/.zshrc`, so the settings must live here:
 
 ```sh
-pback reconcile --dry-run   # report only
-pback reconcile             # save the skip list locally
+mkdir -p ~/.config/photo-backer-upper
+cat > ~/.config/photo-backer-upper/config <<'EOF'
+PHOTO_BACKER_UPPER_MAIN_DIR=/Volumes/Family/Family Pictures
+PHOTO_BACKER_UPPER_NAS_URL=smb://user@nas/Family
+EOF
+chmod 600 ~/.config/photo-backer-upper/config
 ```
 
-**Before the reconcile, normalize the archive's names.** Reconcile matches by capture-time filename, so files named otherwise are invisible to it. `fix-dates` renames files to `YYYY-MM/YYYY-MM-DD_HH-MM-SS.ext` using the date embedded in each file:
+Change both lines to match your NAS. The first is the archive folder as it appears once the share is mounted. The second lets `pback` mount the share itself. All settings are listed under [Settings](#settings).
 
-- **Videos:** every video whose name differs from its local capture time (QuickTime `CreationDate`). That includes `mod_` names, UTC-based names (hours off, sometimes the wrong day), and names from the copy date.
-- **Photos:** only those with camera-style names (`IMG_1234`, `DSC_0001`, `PXL_...`, `100_0789`), renamed from `DateTimeOriginal`. Photos already named with a capture time are left alone.
-- **Folders:** a file in a folder named exactly `YYYY-MM` is renamed and also moved to the folder for its corrected month. A file in any other folder, such as `2005-01 Family Trip`, is renamed in place and never moved, so you can reorganize those yourself later. Files loose at the archive root are not touched at all.
-- **Left alone:** `mod_` images (derived files whose date is often the backup date), descriptive names like `2007 Family Reunion 023.jpg` (unless `--include-other-names`, which loses the description), files with no usable embedded date, videos with only a UTC time (approximate), and any file whose rename would sit next to an existing same-sized file (a probable duplicate; reported, not renamed).
+**4. If the archive already has photos, run reconcile** (once per Mac) so they aren't exported again as duplicates. It only reads the archive. See [One-time archive tools](#one-time-archive-tools) for what it does, and for `fix-dates`, which should be run before it.
 
-It reports by default (summary in the terminal, full plan in a report file under the state directory), writes an undo log when it renames, and your secondary drive needs one `pback mirror --delete` afterwards to drop the old names.
+```sh
+pback reconcile --dry-run
+pback reconcile
+```
+
+`pback export` refuses to run against a non-empty archive until this has been done on that Mac.
+
+**5. Build the launcher app.** macOS privacy permissions attach to the program that runs. `pback` is a Python script, so a small signed app starts it and holds the permissions instead of your whole Python:
+
+```sh
+security find-identity -v -p codesigning        # find your signing identity
+SIGN_IDENTITY="<identity from above>" sh launcher/build.sh
+```
+
+This builds `~/Applications/Photo Backer Upper.app`. If the first command lists no identity, run `sh launcher/build.sh` on its own. That signs ad hoc, which works, but the signature changes on every build, so macOS may ask for the permissions again after each rebuild.
+
+**6. Grant permissions, once.** In Finder, open `~/Applications` and double-click **Photo Backer Upper**. Click **Allow Access to All Photos**, and allow access to the network volume if asked. The app has no window. It then runs `pback export --dry-run`, which changes nothing and takes a few minutes; you can watch it in Activity Monitor.
+
+**7. Start the schedule.**
+
+```sh
+pback install-agent --every-hours 6 --load
+```
+
+This runs an export straight away, then at every login and every 6 hours. To check on it:
+
+```sh
+tail ~/.local/state/photo-backer-upper/logs/export.log
+```
+
+A good run starts with `Photos access status: 3` and ends with a `Processed:` line showing `error: 0`. To stop the schedule: `pback uninstall-agent`.
+
+## How it works
+
+### The pieces
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Command line | `src/photo_backer_upper/cli.py` | Parses commands, builds the `osxphotos` and `rsync` command lines and runs them. |
+| Settings | `config.py` | Reads settings from the environment, then the config file. |
+| Naming | `naming.py` | Functions that osxphotos calls for each photo to get its folder and file name. |
+| Unattended runs | `automation.py` | NAS mounting, the run lock, notifications, the mirror's free-space check, the launchd agent. |
+| Missing-file alerts | `alerts.py` | Finds files a run couldn't download from iCloud and decides when to notify. |
+| Unavailable Live Photo videos | `unavailable.py` | Keeps a list of Live Photos whose video iCloud doesn't deliver. |
+| Reconcile | `reconcile.py` | One-time: works out which library photos are already in the archive. |
+| Fix dates | `fixdates.py` | One-time: renames archive files to their embedded capture date. |
+| Fix export names | `fixexport.py` | One-time: renames files an earlier version of export named in UTC. |
+| Launcher | `launcher/PhotoBackerUpper.swift` | The app launchd runs. Checks Photos access, then starts `pback`. |
+
+The Python package has no dependencies beyond the standard library. It needs Python 3.10 or newer. `osxphotos`, `exiftool` and `rsync` are run as separate programs and must be on `PATH`.
+
+### What happens in a scheduled run
+
+1. **launchd** starts the launcher app with the arguments `export --notify`.
+2. **The launcher** asks for Photos access if that hasn't been decided yet (waiting at most 10 minutes for an answer), logs the access status, sets `PATH` to `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and the system folders, runs `~/.local/bin/pback` with the same arguments, and exits with pback's exit status. Started with no arguments (double-clicked in Finder), it runs `pback export --dry-run`.
+3. **pback takes the run lock** (`pback.lock` in the state folder, holding the PID of the run that has it). Every command except `install-agent` and `uninstall-agent` takes it. If another one is already running, the new one prints a message and exits with status 0. If the other one has held the lock for 4 hours or more and `--notify` is set, it also sends a "may be stuck" notification, so every scheduled run repeats the warning until the stuck run ends.
+4. **pback finds the archive.** If `PHOTO_BACKER_UPPER_MAIN_DIR` isn't an existing folder and `PHOTO_BACKER_UPPER_NAS_URL` is set, it waits up to 120 seconds for the NAS to accept a connection, asks macOS to mount the share (the same call as Finder's Connect to Server, with the password from your keychain), and waits up to 20 seconds for the folder to appear. If the NAS never answers, it doesn't try to mount. If the folder still isn't there, the run fails with "Main archive not found".
+5. **pback runs `osxphotos export`** into the archive (details below).
+6. **pback checks what osxphotos couldn't get** and logs or notifies about it (see [Missing files](#missing-files)).
+
+There is no time limit on a run. A run that hangs is only noticed by the next scheduled run that finds the lock (step 3), so the first "may be stuck" notification comes 4 to 10 hours after it started, with the default 6-hour schedule. pback never stops a run itself, because killing osxphotos or rsync part-way through a copy could leave partial files in the archive.
+
+### Export
+
+`pback export` runs:
+
+```
+osxphotos export <main dir> --update --exportdb <state>/export.db
+    --download-missing --use-photokit
+    --directory <month folder> --filename <capture time>
+    --query-eval "not (photo.syndicated and not photo.saved_to_library)"
+    --verbose --report <state>/export-report.db
+```
+
+- `--update` with a local export database means each run only copies what isn't in the archive yet. The database lives in the state folder on the Mac, not on the NAS, so each Mac tracks its own exports.
+- `--download-missing --use-photokit` fetches originals from iCloud when "Optimize Mac Storage" has removed them from the Mac.
+- The query leaves out items that were only "Shared with You" (Messages and so on) and never saved to the library. Everything else in the library is exported, screenshots included.
+- osxphotos' own defaults apply to the rest: an edited photo is exported as both the original and a second file with an `_edited` suffix, a Live Photo's video is exported as a `.mov` beside the still, and a name that is already taken gets a ` (1)` suffix.
+- If `skip-uuids.txt` exists (written by reconcile), those items are skipped.
+- `PHOTO_BACKER_UPPER_LIBRARY`, `--from-date`, `--to-date` and `--dry-run` are passed through to osxphotos.
+
+**The reconcile guard.** If the archive folder has anything in it, `skip-uuids.txt` doesn't exist, and this isn't a dry run, export refuses to start, because it would copy the whole library in again. `--skip-reconcile-check` overrides it.
+
+**Exit status.** If osxphotos exits with a non-zero status, pback stops and exits with the same status. osxphotos can also fail on individual files and still exit with 0, counting them as `error: N` in its summary. pback reads those from `export-report.db`, lists each file and its error under `EXPORT ERRORS:` at the end of the log, and exits with status 1. With `--notify` that sends a failure notification, and `pback run` skips the mirror. Missing files are not errors (see below).
+
+### File names
+
+osxphotos' built-in `{created}` is the library's `date` field, which Photos stores in UTC for many older or imported items. Names made from it can be hours off, sometimes on the wrong day or in the wrong month. `naming.py` picks the time like this:
+
+- If the library also has a `date_original`, it is within 2 seconds of `date`, and the two have different UTC offsets, use `date_original`. That is the same moment written in the local time where the photo was taken.
+- Otherwise use `date`. This covers items with no `date_original`, items where both already have the same offset, and items whose `date_original` is a different moment altogether (for example an import date).
+
+### Missing files
+
+osxphotos records a file it couldn't download from iCloud as "missing" and still exits successfully. After every real export, pback reads those records from the export database for the run that just finished.
+
+- Every missing file is printed in the log under `NOT BACKED UP:`.
+- With `--notify`, a notification is sent the first time a file is missing and again every 7 days while it stays missing. The record of what has been alerted is `missing-alerts.json`.
+- Two kinds are left out: `.AAE` adjustment files, and `*_edited.mov` files belonging to an item that has a non-`.mov` file recorded in the export database (the edited video of a Live Photo).
+
+**Live Photos whose edited video never arrives.** When an `_edited.mov` is missing for an item that already has a non-`.mov` file recorded in the export database, pback adds the item to `live-unavailable-uuids.txt`. A missing original Live Photo video is not added; it stays in the `NOT BACKED UP:` list and is retried every run. On later runs those items are left out of the main export and exported in a second `osxphotos` pass with `--skip-live`, so the still is kept up to date and the video isn't requested again. The list is deleted, and every item on it retried, once the file has gone 30 days without changing. Adding an item counts as a change. Delete the file to retry sooner.
+
+### Mirror
+
+`pback mirror` copies the main archive to `PHOTO_BACKER_UPPER_SECONDARY_DIR`:
+
+```
+rsync -ah --info=progress2 [--delete-during] <main dir>/ <secondary dir>/
+```
+
+- Nothing is deleted from the secondary unless you pass `--delete`.
+- If the secondary folder is under `/Volumes`, the volume's folder must already exist, so an unplugged drive is never replaced by a plain folder. The secondary folder itself is created if needed.
+- Before copying, pback dry-runs rsync with `--stats` and refuses to start if the amount to copy is more than the drive's free space. `--skip-space-check` turns that off. The check doesn't count space that `--delete` would free.
+- `--info=progress2` needs rsync 3.1 or newer. The rsync that ships with macOS doesn't accept it, so install Homebrew's.
+- rsync doesn't detect renames. After `fix-dates` or `fix-export-names`, a mirror copies the renamed files again in full, and the old names stay on the secondary until a `pback mirror --delete`.
+
+`pback run` does an export and then a mirror, never with `--delete`. If the export fails, the mirror is skipped. If no secondary is set, or its drive isn't attached, `run` prints `Skipping mirror: ...` and exits with status 0. That is a normal skip, so rsync doesn't need to be installed for it. Any other reason the mirror can't start, such as the space check refusing or rsync missing, fails the run with status 2 and, with `--notify`, a notification.
+
+### The scheduled agent
+
+`pback install-agent` writes `~/Library/LaunchAgents/com.photo-backer-upper.export.plist`. The agent runs the launcher app with `export --notify` when it is loaded (at login) and every `--every-hours` hours after that. It only exports; the mirror is never scheduled. Output is appended to `logs/export.log` in the state folder. Nothing trims that file.
+
+`install-agent` refuses to write the plist unless `pback` is on `PATH`, the launcher app exists in `~/Applications`, and `PHOTO_BACKER_UPPER_MAIN_DIR` is set in the config file (not just in the environment). Without `--load` it only writes the plist and prints the `launchctl` command that starts it.
+
+With `--notify`, pback shows a macOS notification when it stops with a configuration error (for example the archive can't be found), when the command exits with a non-zero status, when it finds another run that may be stuck (see above), when it crashes with an unexpected Python error (the traceback is still written to the log, and the exit status is 1), and for missing files as described above.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `pback export` | Photos library to main archive. |
+| `pback mirror` | Main archive to secondary drive. |
+| `pback run` | `export`, then `mirror` if it can. |
+| `pback reconcile` | One-time per Mac: record which library photos are already in the archive. |
+| `pback fix-dates` | One-time per archive: rename archive files to their embedded capture date. |
+| `pback fix-export-names` | One-time: rename files an earlier export named in UTC. |
+| `pback install-agent` | Write (and optionally start) the launchd agent. |
+| `pback uninstall-agent` | Stop the agent and remove its plist. |
+
+Options:
+
+| Option | Commands | Meaning |
+| --- | --- | --- |
+| `--dry-run` | `export`, `mirror`, `run`, `reconcile` | Show what would happen and change nothing. |
+| `--notify` | `export`, `mirror`, `run` | Show macOS notifications for failures (and, for export, missing files). |
+| `--from-date DATE`, `--to-date DATE` | `export` | Only items created on or after / before `DATE`, e.g. `2025-02-01`. |
+| `--skip-reconcile-check` | `export` | Export into a non-empty archive even though reconcile hasn't been run. |
+| `--delete` | `mirror` | Also delete files from the secondary that are gone from the main archive. |
+| `--skip-space-check` | `mirror` | Don't refuse when the copy looks too big for the secondary drive. |
+| `--apply` | `fix-dates`, `fix-export-names` | Actually rename. Without it they only report. |
+| `--videos`, `--photos` | `fix-dates` | Only that group. With neither, both. |
+| `--include-other-names` | `fix-dates` | Also rename files with descriptive names (the description is lost). |
+| `--undo LOG` | `fix-dates` | Reverse the renames recorded in an undo log. |
+| `--every-hours N` | `install-agent` | Run interval. Default 6. |
+| `--load` | `install-agent` | Also start the agent now. |
+
+Exit status: 0 on success (and when another run holds the lock), 2 for a configuration error such as a missing setting, tool or volume, otherwise the exit status of `osxphotos` or `rsync`.
+
+## Settings
+
+Each setting is read from the environment first. If it is unset or empty there, it comes from the config file. Scheduled runs only see the config file.
+
+| Setting | Required | Meaning |
+| --- | --- | --- |
+| `PHOTO_BACKER_UPPER_MAIN_DIR` | yes | The main archive folder, e.g. `/Volumes/Family/Family Pictures`. Must already exist. |
+| `PHOTO_BACKER_UPPER_SECONDARY_DIR` | for `mirror` | The mirror folder, e.g. `/Volumes/Secondary/Photos`. |
+| `PHOTO_BACKER_UPPER_NAS_URL` | no | Share to mount when the main folder isn't found, e.g. `smb://user@nas/Share`. Don't put a password in it; the keychain supplies it. |
+| `PHOTO_BACKER_UPPER_LIBRARY` | no | Path to a Photos library. Default: the system Photos library. |
+| `PHOTO_BACKER_UPPER_STATE_DIR` | no | Where pback keeps its state. Default `~/.local/state/photo-backer-upper`. |
+| `PHOTO_BACKER_UPPER_CONFIG` | no | Path of the config file. Environment only. Default `~/.config/photo-backer-upper/config`. |
+
+The config file is plain `KEY=VALUE` lines:
+
+- Blank lines and lines starting with `#` are ignored. A `#` later in a line is not a comment; it becomes part of the value.
+- A leading `export ` is allowed, so lines can be copied from `~/.zshrc`.
+- One pair of matching quotes around the value is removed. Values with spaces don't need quotes.
+- `~` at the start of the main, secondary, state and config paths is expanded. It is not expanded in `PHOTO_BACKER_UPPER_LIBRARY`, and variables like `$HOME` are never expanded.
+
+## State folder
+
+Everything pback remembers is in the state folder on the Mac (`~/.local/state/photo-backer-upper` by default). Nothing is stored in the archive except the photos.
+
+pback replaces its own state files whole: it writes a temporary file beside the real one and renames it into place, so a crash or full disk part-way through leaves the previous version, never a cut-short skip list. The exceptions are the undo logs, which are appended one line per rename as it happens.
+
+| File | Written by | Purpose |
+| --- | --- | --- |
+| `export.db` | osxphotos | Which library items have been exported where, plus a history row for every file on every run. |
+| `skip-uuids.txt` | `reconcile` (rewritten each time), `fix-export-names` (appended) | Library items export must skip. |
+| `export-report.db` | osxphotos, during `export` | One row per file from the latest osxphotos pass, replaced every pass. pback reads it for file errors. |
+| `skip-uuids.merged.txt` | `export` | `skip-uuids.txt` plus the unavailable Live Photos, rebuilt each run. |
+| `live-unavailable-uuids.txt` | `export` | Live Photos exported without their video. |
+| `missing-alerts.json` | `export` | When each currently missing file was last alerted. |
+| `reconcile-unconfirmed.tsv` | `reconcile` | Library items whose name matched an archive file but couldn't be confirmed. |
+| `fix-dates-report-*.tsv`, `fix-export-names-report-*.tsv` | the fix commands | The full plan from each run. |
+| `fix-dates-*.tsv`, `fix-export-names-*.tsv` | the fix commands with `--apply` | Undo logs: old path, tab, new path. |
+| `pback.lock` | every command except the agent ones | The run lock: the PID of the run holding it. |
+| `logs/export.log` | launchd | Output of every scheduled run. |
+
+## One-time archive tools
+
+These exist to bring an archive that predates pback into line. Run them in this order: `fix-dates`, then `reconcile`, then start exporting. They take the same run lock as `export`, so they exit straight away if an export is running, and a scheduled export that comes due while they run skips that turn. If one runs for more than 4 hours, scheduled runs start sending "may be stuck" notifications.
+
+### fix-dates
+
+Reconcile recognises archive files by their capture-time name, so files named any other way are invisible to it. `pback fix-dates` renames files to `YYYY-MM-DD_HH-MM-SS.ext` using the date embedded in each file. It needs `exiftool`.
 
 ```sh
 pback fix-dates                    # report only
@@ -70,40 +261,63 @@ pback fix-dates --videos --apply   # or --photos: one group at a time
 pback fix-dates --undo LOG
 ```
 
-Candidate matches are by capture-time filename (`YYYY-MM-DD_HH-MM-SS`, with `-N` or ` (N)` collision suffixes, any extension), then confirmed by metadata as above. Run `fix-dates` first so older videos and camera-named photos are named by capture time; otherwise they won't match and would be exported again.
+- **Videos** (`.mov`, `.mp4`, `.m4v`): renamed when the name is date-style, `mod_`-prefixed or camera-style and differs from the QuickTime `Keys:CreationDate`. A video with only a `QuickTime:CreateDate` (UTC) is counted as approximate and left alone.
+- **Photos** (`.jpg`, `.jpeg`, `.heic`, `.png`, `.tif`, `.tiff`, `.gif`, `.webp`, `.avif`): only camera-style names (`IMG_1234`, `DSC_0001`, `PXL_...`, `100_0789` and similar) are renamed, from `DateTimeOriginal`, or `CreateDate` when there is no `DateTimeOriginal`. Photos already named by date, and `mod_` images, are left alone.
+- **Folders:** a file in a folder named exactly `YYYY-MM` also moves to the folder for its corrected month. A file in any other folder, such as `2005-01 Family Trip`, is renamed in place. Files loose at the top of the archive are not touched.
+- **Left alone:** descriptive names like `2007 Family Reunion 023.jpg` (unless `--include-other-names`), files with no usable embedded date or a date before 1990, empty files, hidden files, other file types, and any file whose new name would sit beside an existing file of the same size (a probable duplicate; reported, not renamed).
+- A new name that is taken by a file of a different size gets a ` (1)`, ` (2)`... suffix.
+- With `--apply`, each rename is checked again just before it happens. If the file has gone or its new name has been taken since the scan, it is skipped and listed, never overwritten. Run `fix-dates` again to pick those up.
+- osxphotos' edited copies, named `<date>_edited` or `<date>_edited (N)`, are never touched. Other files `pback export` wrote are not recognised as such: a video named `<date>.mov` whose embedded date differs from its name would be renamed, and the next export would copy it in again under its old name. `fix-dates` is meant for the archive as it was before exporting started.
+
+The summary goes to the terminal and the full plan to a report file in the state folder. `--undo` puts each file back if the new name still exists and the old one doesn't. It doesn't mount the NAS for you.
+
+### reconcile
+
+`pback reconcile` reads the whole Photos library (`osxphotos query --json`) and the archive, and writes `skip-uuids.txt`: the library items that are already in the archive. It needs `osxphotos` and `exiftool`, and never modifies the archive.
+
+A library item is treated as already archived only if both of these hold:
+
+1. An archive file is named with the item's capture time (`YYYY-MM-DD_HH-MM-SS`, optionally followed by `-N` or ` (N)`, any extension, in any folder). Both the item's `date_original` and its `date` are tried.
+2. The file's metadata agrees with the library item. Camera model, sub-second capture time and (for videos) duration are compared wherever both sides have a value. Any one of them differing rules the file out. A different aspect ratio is accepted only if the camera model or sub-second time agrees. At least one thing must agree; if there is nothing to compare, the item is not confirmed.
+
+Each archive file can vouch for only one library item. Items with a name match but no confirmed file are listed in `reconcile-unconfirmed.tsv` and will be exported, which at worst makes a duplicate with a ` (1)` suffix.
+
+Each run replaces `skip-uuids.txt` from scratch, including anything `fix-export-names` added to it.
+
+### fix-export-names
+
+An earlier version of export named files from `{created}`. `pback fix-export-names` goes through the files recorded in `export.db`, finds those whose name is the library's `date` where the [current rule](#file-names) gives a different time, and renames them, moving them to the right month folder and keeping any suffix such as `_edited` or ` (1)`. It never overwrites; a taken name gets the next free ` (N)`.
+
+Without `--apply` it only writes a report. With it, each rename is written to an undo log in the same format as `fix-dates`, so `pback fix-dates --undo LOG` reverses it, and the renamed items are added to `skip-uuids.txt` so export doesn't recreate them under their old names.
+
+## The launcher app
+
+`launcher/build.sh` compiles `PhotoBackerUpper.swift` and signs it with the hardened runtime and the Photos entitlement.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SIGN_IDENTITY` | `-` (ad hoc) | Code signing identity. |
+| `APP_PATH` | `~/Applications/Photo Backer Upper.app` | Where to build. Anything already there is deleted first. |
+
+`pback install-agent` only looks for the app at the default path.
+
+### Releasing the launcher
+
+`launcher/release.sh` builds the app into `build/release/`, signs it with a Developer ID certificate, has Apple notarize it, staples the ticket, and writes `build/release/PhotoBackerUpper.zip`.
+
+One-time setup:
+
+1. A "Developer ID Application" certificate in your keychain.
+2. Notarization credentials saved under a keychain profile: `xcrun notarytool store-credentials pback-notary`
 
 ```sh
-pback export --dry-run   # preview what would be exported
-pback export             # Photos library -> main archive
-pback export --from-date 2025-02-01 --to-date 2025-03-01   # just a date range
-pback mirror             # main archive -> secondary drive
-pback run                # export, then mirror if the drive is attached
+SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" sh launcher/release.sh
 ```
 
-The export state database is kept on the local Mac (not on the NAS), so each Mac tracks its own exports while writing into the shared archive.
+Set `NOTARY_PROFILE` to use a profile name other than `pback-notary`.
 
-**Names use local capture time.** osxphotos' built-in `{created}` is UTC with no timezone for many older or imported items, which puts names hours off (sometimes the wrong day or month). `naming.py` uses the library's local `date_original` when it is the same instant as `date` but in a different timezone, and otherwise keeps `date`. Items whose `date_original` is bogus (e.g. an import date) can't be corrected and keep an approximate, UTC-based name. If an earlier export named files in UTC, `pback fix-export-names` (report first, `--apply` to rename, with an undo log in the same format as `fix-dates`) renames them and adds those items to the skip list.
-
-Items whose originals can't be downloaded are reported as "missing" and skipped; re-running `export` retries them (opening the item in Photos can force the download).
-
-**Size the secondary drive for the whole archive.** `mirror` first dry-runs rsync and refuses to start if the copy won't fit in the drive's free space, since a full drive part-way through a `--delete` mirror can leave the copy half-updated. rsync doesn't detect renames, so after `fix-dates` a mirror re-copies the renamed files in full.
-
-## Automation
-
-Scheduled runs need two things first:
-
-1. **A config file.** launchd doesn't read `~/.zshrc`, so put at least `PHOTO_BACKER_UPPER_MAIN_DIR` (and `PHOTO_BACKER_UPPER_NAS_URL` if you want auto-mount) in `~/.config/photo-backer-upper/config`. `install-agent` refuses to run without it.
-2. **The launcher app.** macOS privacy permissions attach to the program that runs, and `pback` is a script, so granting them would mean granting them to the whole Python interpreter. Instead a tiny signed app runs `pback`, and only that app gets the permissions.
+## Development
 
 ```sh
-SIGN_IDENTITY="<your signing identity>" sh launcher/build.sh   # builds ~/Applications/Photo Backer Upper.app
+uv run --with pytest pytest
 ```
-
-Then open the app once in Finder: it asks for Photos access ("All Photos") and runs `pback export --dry-run`. Allow the network volume prompt too. Find your identity with `security find-identity -v -p codesigning`; with no `SIGN_IDENTITY` it signs ad hoc, and macOS will ask for the permissions again after every rebuild.
-
-```sh
-pback install-agent --every-hours 6 --load   # launchd agent: runs the launcher with `export --notify` at login and every 6 hours
-pback uninstall-agent
-```
-
-The agent writes its log to `logs/export.log` in the state directory and shows a notification if a run fails. Only one `export`/`mirror` runs at a time, so a scheduled run that overlaps a long one exits quietly. If the NAS isn't mounted and `PHOTO_BACKER_UPPER_NAS_URL` is set, it mounts it first; otherwise the run is skipped with an error. Settings come from the config file, not `~/.zshrc`. The Mac must be awake and logged in, and the launcher app needs Photos access ("All Photos") and access to network volumes in System Settings, privacy and security (Full Disk Access only if a run turns out to need it). The mirror is deliberately not scheduled.

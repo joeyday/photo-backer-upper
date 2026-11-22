@@ -20,6 +20,8 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+from .atomic import write_text_atomic
+
 STEM_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})(?:-\d+| \(\d+\))?$")
 STEM_FMT = "%Y-%m-%d_%H-%M-%S"
 SKIP_FILE = "skip-uuids.txt"
@@ -180,11 +182,11 @@ def reconcile(main_dir: Path, state_dir: Path, library: str = None, dry_run: boo
         print("Dry run: skip list and report not written.")
         return 0
     state_dir.mkdir(parents=True, exist_ok=True)
-    report.write_text("".join(
+    write_text_atomic(report, "".join(
         f"{p['uuid']}\t{p.get('original_filename')}\t{p.get('date_original')}\t"
         f"{';'.join(str(f.relative_to(main_dir)) for f in files)}\n" for p, files in unconfirmed))
     path = state_dir / SKIP_FILE
-    path.write_text("".join(f"{p['uuid']}\n" for p in skip))
+    write_text_atomic(path, "".join(f"{p['uuid']}\n" for p in skip))
     print(f"Wrote {len(skip)} UUIDs to {path}")
     print(f"Unconfirmed name matches listed in {report}")
     return 0

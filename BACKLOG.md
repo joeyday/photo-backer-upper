@@ -6,8 +6,8 @@ Not part of the MVP.
 - **Replace archive JPGs with HEIC originals** where the Photos library has the original (pre-iCloud photos have none and stay JPG). Build on the reconcile matching; move replaced JPGs to a quarantine folder, never delete. Report first.
 - **launchd automation**: `pback install-agent` is written (scheduled `export`, NAS auto-mount, lock, notifications) but not yet tested under launchd; macOS privacy permissions (Photos, Full Disk Access) for the launchd-run executable are the open risk. Still to do: `mirror` when the secondary drive mounts (`StartOnMount`), never with `--delete` unattended.
 - **Bigger secondary drive.** The archive (about 2.1 TiB) no longer fits the 1 TB external drive; `mirror` refuses to start. Mirror stays off until a larger drive is in place.
-- **Missing originals.** A few library items (3 videos, 9 edited Live Photos) never download; export reports them as missing and retries each run.
-- **Export re-downloads already-archived items.** A full `export` on 2026-11-20 took 24 minutes (the dry-run took 2) and finished with 1 exported, 11,706 skipped and 9 missing. The dry-run had listed about 1,627 iCloud originals as "missing" that weren't in the reconcile skip list, and they appear to have been downloaded and then skipped. Find out why: Photos' "Optimize Mac Storage" evicting originals so every run re-fetches them, or osxphotos downloading before it checks `export.db`. Matters for scheduled run time and iCloud bandwidth.
+- **Missing originals.** Earlier runs recorded 9 large videos (0.4 to 37 GB) as missing; all of them downloaded on a later run and are in the archive. `export` now logs `NOT BACKED UP:` with the file names whenever iCloud doesn't deliver a photo or video, and with `--notify` (the launchd agent) shows a notification the first time and every 7 days while it stays missing. Edited Live Photo videos are ignored (iCloud may simply not have them).
+- **Export re-downloads already-archived items.** Mostly resolved (2026-11-21). The 24-minute run on 2026-11-20 isn't reproducible: runs since take about 4 minutes. osxphotos 0.78.1 checks export.db and the archived file's size/mtime before downloading from iCloud, and every live record matches the NAS, so originals evicted by "Optimize Mac Storage" are not re-fetched. The dry-run's "missing" list is misleading because dry-run skips that check. The one repeat download left was 9 edited Live Photos whose edited video iCloud never provides; `export` now lists those in `live-unavailable-uuids.txt` and exports them in a second `--skip-live` pass (list cleared every 30 days to retry). Not yet confirmed with a real scheduled run; network traffic during a run hasn't been measured.
 - **Wife's Mac**: run the same CLI there with its own local state, writing to the same main archive.
 - **Approximate-date videos** (UTC `CreateDate` only): `fix-dates` lists but doesn't rename them. Could resolve them by matching the library item and using its local time.
 
@@ -15,3 +15,35 @@ Not part of the MVP.
 
 - **Items with a bogus `date_original` (about 170).** Old files (e.g. some Fuji JPGs) whose EXIF time is an import date: their `date` is the right instant but the timezone is unknown, so they're named in UTC and can land on the wrong day or month. Could be fixed by assuming the library owner's timezone at the time, or by hand.
 - **Probable duplicates from recovery.** About 330 `(1)` files were added when the reconcile audit was corrected (screenshots and PNGs that couldn't be verified). Review and quarantine, never delete.
+
+## Code review, 2026-11-21
+
+Findings from a full read of the code, checked against osxphotos 0.78.1 and the real state folder. The ones worth the extra code are fixed; the rest are deliberately left alone to keep pback simple.
+
+### Fixed
+
+1. **A Live Photo video that failed to download once was silenced for 30+ days.** Only `_edited.mov` now goes on `live-unavailable-uuids.txt`; a missing original video keeps alerting.
+2. **osxphotos file errors never notified.** osxphotos exits 0 with `error: N`. Export now passes `--report export-report.db`, lists any file errors under `EXPORT ERRORS:` and exits 1. Not yet seen in a real run.
+3. **A hung run stopped backups silently.** A run that finds the lock held for 4 hours or more notifies "may be stuck" (with `--notify`), so every scheduled run repeats the warning. A losing run no longer wipes the holder's PID and start time from the lock file. The launcher waits at most 10 minutes for the Photos prompt (needs an app rebuild to take effect). Runs are never killed, to avoid partial files.
+4. **Crashes didn't notify.** `main` notifies "crashed (ExceptionType)" with `--notify`, then re-raises so the traceback still reaches the log.
+5. **`fix-dates` would rename osxphotos' `<date>_edited` copies.** It now skips them. Other exported files aren't recognised; `fix-dates` is for the archive as it was before exporting.
+6. **The one-time tools didn't take the run lock.** `reconcile`, `fix-dates` and `fix-export-names` now do, and `fix-dates --apply` re-checks each rename instead of overwriting.
+7. **State files were written in place.** `atomic.py` writes a temp file and renames it over the old one, for the skip lists, the Live Photo list, `missing-alerts.json` and `reconcile-unconfirmed.tsv`.
+8. **`pback run` reported success when the mirror was refused for space.** Only "no secondary set or attached" is a normal skip now; anything else fails the run.
+9. **`requires-python` said 3.9 but the code needs 3.10.** Fixed in `pyproject.toml` and `uv.lock`.
+
+### Won't fix
+
+Not worth the extra code for a family backup tool, or only affect one-time tools that have already been run.
+
+- The Live Photo list's 30-day retry counts from the file's last change, so adding an item pushes it back. The list holds 9 items and rarely grows.
+- `install-agent --load` runs `launchctl bootstrap` straight after `bootout`, which might fail while the old job shuts down. Untested; re-running it would fix it.
+- An export with `--from-date`/`--to-date` resets alert state for files outside the range, so they alert again on the next full run.
+- `fix-dates`: an invalid `DateTimeOriginal` blocks the `CreateDate` fallback; RAW files and older video types (`.avi`, `.mpg`, `.3gp`, `.mts`) are ignored; a bad exiftool chunk counts as "no date"; `--undo` doesn't mount the NAS.
+- `reconcile` crashes on bad exiftool output instead of skipping it.
+- `install-agent` checks for `pback` on `PATH`, but the launcher only looks in `~/.local/bin`.
+- `PHOTO_BACKER_UPPER_LIBRARY` isn't `~`-expanded (documented in the README).
+- `require_mounted` checks that the folder exists, not that it's a mount point.
+- `fix-export-names` adds an item to the skip list even when its rename was skipped.
+- An edited `.mp4` video's missing `_edited.mov` is ignored by the alerts.
+- Performance: the log grows about 1 MB per run and is never trimmed (delete it now and then); pback scans the export history table twice per run (well under a second); `fix-dates` and `reconcile` walk the archive more than they need to (one-time tools); `mirror` dry-runs rsync for its space check (that's the check); the config file is re-read on every lookup (negligible). The scheduled run itself takes 2.5 to 4 minutes, almost all of it osxphotos checking files against the NAS, and has little left to gain.

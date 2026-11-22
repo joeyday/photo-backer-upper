@@ -15,10 +15,11 @@ What is eligible:
            Renamed from DateTimeOriginal (or CreateDate). Photos already named with a
            capture time are left alone.
 
-Never renamed: mod_ images (derived files whose date is unreliable), files with
-descriptive names (unless include_other_names), files with no usable embedded date,
-and anything whose rename would sit next to an existing same-sized file (probable
-duplicate: reported instead).
+Never renamed: osxphotos' `<date>_edited` copies (renaming one would lose the suffix and
+make the next export copy it in again), mod_ images (derived files whose date is
+unreliable), files with descriptive names (unless include_other_names), files with no
+usable embedded date, and anything whose rename would sit next to an existing same-sized
+file (probable duplicate: reported instead).
 """
 
 import json
@@ -38,6 +39,8 @@ CAMERA_NAME_RE = re.compile(
     r"^(?:(?:IMG|DSC[NF]?|PXL|MVI|VID|PICT|SAM|P)[_-]?\d|\d{3}[_-]\d{4}|\d{8}[_-]\d{6}"
     r"|\d{4}[-_.]\d{2}[-_.]\d{2}[ _-]\d{2}[-_.]\d{2}[-_.]\d{2})", re.I)
 MONTH_DIR_RE = re.compile(r"^\d{4}-\d{2}$")
+# osxphotos' name for the edited copy of an item: "<date>_edited", maybe with " (N)".
+EDITED_NAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_edited(?: \(\d+\))?$")
 CHUNK = 200
 
 
@@ -54,7 +57,7 @@ def scan(main_dir: Path, videos: bool, photos: bool) -> list:
     out = []
     for root, _dirs, files in os.walk(main_dir):
         for name in files:
-            if name.startswith("."):
+            if name.startswith(".") or EDITED_NAME_RE.match(Path(name).stem):
                 continue
             ext = Path(name).suffix.lower()
             if (videos and ext in VIDEO_EXTS) or (photos and ext in PHOTO_EXTS):
@@ -235,13 +238,24 @@ def fix_dates(main_dir: Path, state_dir: Path, apply: bool = False, videos: bool
         return 0
 
     log = state_dir / f"fix-dates-{stamp_now}.tsv"
+    done, changed = 0, []
     with open(log, "a") as f:
         for _kind, _a, old, new, _why in renames:
+            # The plan may be stale (the scan can take a long time): never overwrite.
+            if not old.exists() or new.exists():
+                changed.append(old)
+                continue
             new.parent.mkdir(parents=True, exist_ok=True)
             os.rename(old, new)
             f.write(f"{old}\t{new}\n")
             f.flush()
-    print(f"Renamed {len(renames)} files. Undo log: {log}")
+            done += 1
+    print(f"Renamed {done} files. Undo log: {log}")
+    if changed:
+        print(f"Skipped {len(changed)} that changed since the scan (source gone or new name taken); "
+              "run fix-dates again for them:")
+        for old in changed[:20]:
+            print(f"  {old.relative_to(main_dir)}")
     return 0
 
 

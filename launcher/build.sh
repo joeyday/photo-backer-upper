@@ -6,12 +6,17 @@
 set -eu
 identity="${SIGN_IDENTITY:--}"
 here="$(cd "$(dirname "$0")" && pwd)"
-app="$HOME/Applications/Photo Backer Upper.app"
+app="${APP_PATH:-$HOME/Applications/Photo Backer Upper.app}"
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp "$here/Info.plist" "$app/Contents/Info.plist"
 swiftc -O "$here/PhotoBackerUpper.swift" -o "$app/Contents/MacOS/PhotoBackerUpper"
-codesign --force --sign "$identity" --identifier local.photo-backer-upper.launcher "$app"
+# Hardened runtime + entitlements on every build, so dev builds behave like the notarized
+# release. A secure timestamp (needed for notarization) only works with a real identity.
+timestamp="--timestamp=none"
+[ "$identity" != "-" ] && timestamp="--timestamp"
+codesign --force --sign "$identity" --identifier local.photo-backer-upper.launcher \
+    --options runtime $timestamp --entitlements "$here/entitlements.plist" "$app"
 codesign --verify --verbose "$app"
 echo "Built: $app"

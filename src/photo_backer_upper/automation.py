@@ -5,11 +5,13 @@ import os
 import plistlib
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from . import config
 
@@ -21,10 +23,53 @@ class ConfigError(Exception):
 
 
 class LockBusy(Exception):
-    pass
+    def __init__(self, message: str, held_seconds: float = 0):
+        super().__init__(message)
+        self.held_seconds = held_seconds
 
 
 # --- NAS mount -------------------------------------------------------------------------
+
+_DEFAULT_PORTS = {"smb": 445, "cifs": 445, "afp": 548, "nfs": 2049}
+NAS_WAIT_SECONDS = 120
+
+
+def nas_endpoint(url: str) -> tuple[str, int] | None:
+    """Host and port to probe for a share URL like smb://user@host/Share, or None."""
+    parts = urlsplit(url)
+    if not parts.hostname:
+        return None
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    return parts.hostname, port or _DEFAULT_PORTS.get(parts.scheme.lower(), 445)
+
+
+def wait_for_nas(url: str, timeout: float = NAS_WAIT_SECONDS) -> bool:
+    """Wait until the NAS accepts connections, e.g. while the network comes up after boot.
+
+    Returns True as soon as it answers, False if it never does within `timeout` seconds.
+    Unparseable URLs return True so the mount call still gets a chance.
+    """
+    endpoint = nas_endpoint(url)
+    if endpoint is None:
+        return True
+    deadline = time.monotonic() + timeout
+    announced = False
+    while True:
+        try:
+            with socket.create_connection(endpoint, timeout=3):
+                return True
+        except OSError:
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        if not announced:
+            print("NAS not reachable yet; waiting for the network...", flush=True)
+            announced = True
+        time.sleep(5)
+
 
 def ensure_nas_mounted(archive_dir: Path) -> None:
     """If the archive folder is missing and a NAS URL is configured, try to mount it.
@@ -37,6 +82,10 @@ def ensure_nas_mounted(archive_dir: Path) -> None:
     url = config.get("PHOTO_BACKER_UPPER_NAS_URL")
     if not url:
         return  # the caller's mount check reports the problem
+    if not wait_for_nas(url):
+        # Don't call mount: it would pop up a "can't connect" dialog nobody is there to see.
+        print(f"NAS not reachable after {NAS_WAIT_SECONDS}s; skipping mount.", flush=True)
+        return
     print("Archive not found; trying to mount the NAS...", flush=True)
     try:
         subprocess.run(
@@ -56,21 +105,36 @@ def ensure_nas_mounted(archive_dir: Path) -> None:
 
 @contextmanager
 def run_lock(state_dir: Path):
-    """Only one export/mirror at a time; a scheduled run that overlaps a long one just exits."""
+    """Only one export/mirror at a time; a scheduled run that overlaps a long one just exits.
+
+    The lock file holds the holder's PID, and its modified time is when the lock was taken,
+    so a run that finds it busy can tell how long the other one has been going.
+    """
     path = state_dir / "pback.lock"
-    f = open(path, "w")
+    f = open(path, "a+")   # not "w": a run that loses the race mustn't wipe the holder's PID or time
     try:
         fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         f.close()
-        raise LockBusy("another pback run is already in progress; exiting")
+        try:
+            held = max(0.0, time.time() - path.stat().st_mtime)
+        except OSError:
+            held = 0.0
+        raise LockBusy("another pback run is already in progress; exiting", held)
     try:
+        f.seek(0)
+        f.truncate()
         f.write(str(os.getpid()))
         f.flush()
         yield
     finally:
         fcntl.flock(f, fcntl.LOCK_UN)
         f.close()
+
+
+# A run that finds the lock held this long warns that the holder may be stuck. Normal runs
+# take minutes; a first export or a huge iCloud download can take hours.
+STUCK_HOURS = 4
 
 
 # --- notifications ---------------------------------------------------------------------

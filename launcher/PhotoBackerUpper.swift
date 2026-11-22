@@ -17,6 +17,7 @@ func log(_ s: String) {
 
 // Ask for Photos access. Shows the system prompt the first time when launched from Finder;
 // when launched headlessly (launchd) it can't prompt and just reports the current status.
+// Waits at most 10 minutes for an answer, so a prompt nobody sees can't hang every scheduled run.
 func photosStatus() -> PHAuthorizationStatus {
     let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     if current != .notDetermined { return current }
@@ -26,7 +27,10 @@ func photosStatus() -> PHAuthorizationStatus {
         result = status
         sema.signal()
     }
-    sema.wait()
+    if sema.wait(timeout: .now() + 600) == .timedOut {
+        log("No answer to the Photos access request after 10 minutes; carrying on without it.")
+        return PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    }
     return result
 }
 

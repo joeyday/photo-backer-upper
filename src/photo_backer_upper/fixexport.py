@@ -19,6 +19,7 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
+from .atomic import write_text_atomic
 from .naming import choose
 from .reconcile import SKIP_FILE
 
@@ -111,9 +112,11 @@ def fix_export_names(main_dir: Path, state_dir: Path, library=None, apply=False)
             log.flush()
             done += 1
     skip = state_dir / SKIP_FILE
-    have = set(skip.read_text().split()) if skip.exists() else set()
-    with open(skip, "a") as f:
-        f.write("".join(f"{u}\n" for u in sorted(fixed_uuids - have)))
+    old_text = skip.read_text() if skip.exists() else ""
+    have = set(old_text.split())
+    if old_text and not old_text.endswith("\n"):
+        old_text += "\n"
+    write_text_atomic(skip, old_text + "".join(f"{u}\n" for u in sorted(fixed_uuids - have)))
     print(f"Renamed {done} files. Undo log: {undo_log}")
     print(f"Added {len(fixed_uuids - have)} items to the skip list so export leaves them alone.")
     return 0
