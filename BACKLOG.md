@@ -47,3 +47,51 @@ Not worth the extra code for a family backup tool, or only affect one-time tools
 - `fix-export-names` adds an item to the skip list even when its rename was skipped.
 - An edited `.mp4` video's missing `_edited.mov` is ignored by the alerts.
 - Performance: the log grows about 1 MB per run and is never trimmed (delete it now and then); pback scans the export history table twice per run (well under a second); `fix-dates` and `reconcile` walk the archive more than they need to (one-time tools); `mirror` dry-runs rsync for its space check (that's the check); the config file is re-read on every lookup (negligible). The scheduled run itself takes 2.5 to 4 minutes, almost all of it osxphotos checking files against the NAS, and has little left to gain.
+
+## Code style and structure, 2026-11-22
+
+A read of the code for readability rather than bugs. Nothing here changes behavior. None of it is done yet.
+
+### Findings
+
+The source is about 1,500 lines in 10 modules, the largest 335 lines. Module docstrings and comments explain why, and `naming.py`, `atomic.py` and `alerts.py` each do one thing. The weak spots:
+
+- **Four functions do too much.** `cmd_export` (`cli.py`), `plan_files` and `fix_dates` (`fixdates.py`) and `fix_export_names` (`fixexport.py`) each mix deciding, printing a report and acting.
+- **Plans are anonymous tuples.** `fix_dates` reads fields as `p[1]`, `p[4]`, `p[2].parent`.
+- **Duplication.** The `%Y-%m-%d_%H-%M-%S` format and its regex are defined four times under four names (`fixdates.py`, `reconcile.py`, `fixexport.py`, `naming.py`). The "missing files" SQL query is copied between `alerts.py` and `unavailable.py`. The `osxphotos query --json` call is written in both `reconcile.py` and `fixexport.py`. The video extensions are listed in `alerts.py` and `fixdates.py`. `getattr(args, "notify", False)` appears six times in `cli.py`, and `cmd_mirror` builds the rsync command twice.
+- **Things in the wrong place.** `automation.py` holds five unrelated topics (share mount, run lock, notifications, free-space guard, launchd agent) plus `ConfigError`, the app-wide error. `cli.py` holds the whole export logic. `config.file_values()` only wraps `_file_values()`.
+- **Terse names in places:** `fd`, `fe`, `mi`, `ia` in the parser; `cls`, `lw`/`lh`/`aw`/`ah` elsewhere.
+- **Thin tests where the logic is densest.** `tests/test_fixdates.py` is 36 lines for 270 lines of code. pytest isn't declared in `pyproject.toml`.
+
+### Decision: Ruff
+
+Use Ruff for both formatting and linting (it covers what Black, isort and flake8 did). Line length 100, otherwise default settings. A dry run on 2026-11-22: the formatter would rewrite 17 of 22 files (cosmetic only); 37 lines are over 100 characters; the linter finds 2 unused imports, unsorted imports in 5 files and one `raise` without `from`.
+
+- Rule sets: `E`, `F`, `W`, `I`, `B`, `UP`, `SIM`. Add `C90` (complexity) only after step 4 below, since the four long functions would fail it today.
+- A pre-commit hook kept in the repo (`.githooks/pre-commit`, enabled with `git config core.hooksPath .githooks`) runs `ruff format --check`, `ruff check` and the tests. It refuses the commit rather than reformatting, so a commit never contains changes nobody looked at.
+- Add a dev dependency group with `ruff` and `pytest` so `uv run pytest` works.
+
+### Target layout
+
+| Module | Contents |
+|---|---|
+| `cli.py` | Argument parser and `main()` only |
+| `export.py` | The export command, split into: build the osxphotos command, the Live Photo second pass, reporting |
+| `mirror.py` | rsync and the free-space guard |
+| `errors.py` | `ConfigError`, `LockBusy`, `SecondaryUnavailable` |
+| `lock.py`, `mount.py`, `notify.py`, `agent.py` | `automation.py`, split along its own section banners |
+| `exportdb.py` | The osxphotos export database queries shared by `alerts.py` and `unavailable.py` |
+| `library.py` | The one `osxphotos query` call and the "Shared with You" filter |
+| `naming.py` | Also the single home of the timestamp format and regex |
+| `fixdates.py`, `fixexport.py` | Kept, each split into plan, report and apply, sharing a `Rename` dataclass and one undo-log writer |
+
+Constraint: osxphotos loads `naming.py` by file path, outside the package, so it can't import from other pback modules. Other modules import from it, not the other way round.
+
+### Order
+
+Each step is its own commit, with the tests passing after each.
+
+1. **Ruff and the hook.** Purely mechanical, and done first so the reformat doesn't muddy later diffs.
+2. **Remove the duplication:** timestamp format, SQL query, library query, video extensions.
+3. **Split `automation.py` and `cli.py`.** Moving code, not changing it. Tests that patch `cli.cmd_export`, `cli.notify` and similar need their targets updated.
+4. **Restructure the four long functions.** The only risky step. Write tests for `plan_files` and `fix_export_names` first, then refactor against them. Then turn on the complexity rule.
