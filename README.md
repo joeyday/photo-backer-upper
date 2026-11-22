@@ -326,13 +326,39 @@ Without `--apply` it only writes a report. With it, each rename is written to an
 
 `launcher/release.sh` builds the app into `build/release/`, signs it with a Developer ID certificate, has Apple notarize it, staples the ticket, and writes `build/release/PhotoBackerUpper.zip`.
 
-One-time setup:
+You only need a release to hand the app to another Mac. The launcher passes its arguments straight to `pback`, so new `pback` commands and flags never need one. Rebuild it only when `PhotoBackerUpper.swift`, `Info.plist` or `entitlements.plist` change. For your own Mac, `build.sh` is enough.
 
-1. A "Developer ID Application" certificate in your keychain.
-2. Notarization credentials saved under a keychain profile: `xcrun notarytool store-credentials pback-notary`
+One-time setup, once per Mac:
+
+1. A "Developer ID Application" certificate with its private key in your login keychain. Only the Account Holder of the Apple Developer Program can create one. If Xcode's Settings > Accounts > Manage Certificates fails, create it on developer.apple.com instead, from a certificate signing request made in Keychain Access. Check that `security find-identity -v -p codesigning` lists it.
+2. Notarization credentials saved under a keychain profile. The prompt may ask for an App Store Connect API key; the Apple ID route is simpler. Create an app-specific password at account.apple.com (Sign-In and Security), then type it at the prompt:
+
+   ```sh
+   xcrun notarytool store-credentials pback-notary \
+     --apple-id "<your Apple ID>" --team-id "<your 10-character team ID>"
+   ```
+
+To make a release:
+
+1. Bump `CFBundleShortVersionString` in `launcher/Info.plist` and `version` in `pyproject.toml`. Merge to `main` and pull, so the build comes from a pushed commit.
+2. Build, sign, notarize and staple (takes a few minutes while Apple checks it):
+
+   ```sh
+   SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" sh launcher/release.sh
+   ```
+
+   It ends with `source=Notarized Developer ID`. If Apple rejects the app, `xcrun notarytool log <submission-id> --keychain-profile pback-notary` says why.
+3. Publish `build/release/PhotoBackerUpper.zip` as a GitHub Release, not in the repository (`build/` is ignored):
+
+   ```sh
+   gh release create vX.Y.Z build/release/PhotoBackerUpper.zip --title vX.Y.Z --notes "..."
+   ```
+
+To use the notarized app on your own Mac, replace the installed copy with `ditto`, which keeps the signature intact, then launch it once by hand. A new signing identity makes macOS ask again for Photos and network access, and the scheduled job can't answer those prompts:
 
 ```sh
-SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" sh launcher/release.sh
+rm -rf ~/Applications/"Photo Backer Upper.app"
+ditto "build/release/Photo Backer Upper.app" ~/Applications/"Photo Backer Upper.app"
 ```
 
 Set `NOTARY_PROFILE` to use a profile name other than `pback-notary`.
