@@ -211,7 +211,8 @@ def fix_dates(
         plan_files(main_dir, vids, info, "video", include_other_names, taken, plan, skipped)
     if photos:
         print("Scanning photos...")
-        # Only camera-style (non-date) photos need metadata; date-named and mod_ ones are left alone.
+        # Only camera-style (non-date) photos need metadata; date-named and mod_ ones are left
+        # alone.
         imgs = []
         for p in scan(main_dir, False, True):
             if p.name.startswith("mod_"):
@@ -241,13 +242,14 @@ def fix_dates(
     print(f"  total: {len(renames)}")
     moved = sum(1 for p in renames if p[2].parent != p[3].parent)
     print(
-        f"  of which move to a different month folder: {moved}; renamed in place: {len(renames) - moved}"
+        f"  of which move to a different month folder: {moved}; "
+        f"renamed in place: {len(renames) - moved}"
     )
     print("Not renamed:")
     for reason, n in skipped.most_common():
         print(f"  {n:>7}  {reason}")
     print("Samples:")
-    for kind, _a, old, new, why in renames[:5] + renames[5:][-5:]:
+    for _kind, _a, old, new, why in renames[:5] + renames[5:][-5:]:
         print(f"  {old.relative_to(main_dir)} -> {new.relative_to(main_dir)}  [{why}]")
     print(f"Full plan: {report}")
 

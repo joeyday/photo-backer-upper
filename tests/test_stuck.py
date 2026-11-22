@@ -14,9 +14,8 @@ def test_busy_lock_reports_holder_age_and_keeps_its_pid(tmp_path):
         assert path.read_text() == str(os.getpid())
         old = time.time() - 5 * 3600
         os.utime(path, (old, old))
-        with pytest.raises(LockBusy) as busy:
-            with run_lock(tmp_path):
-                pass
+        with pytest.raises(LockBusy) as busy, run_lock(tmp_path):
+            pass
         assert busy.value.held_seconds >= 5 * 3600 - 5
         assert path.read_text() == str(os.getpid())  # the loser didn't truncate it
 
@@ -60,9 +59,8 @@ def test_one_time_tools_wait_for_the_lock(tmp_path, monkeypatch, argv):
     for name in ("cmd_reconcile", "cmd_fix_dates", "cmd_fix_export_names"):
         monkeypatch.setattr(cli, name, lambda args: ran.append(args) or 0)
     monkeypatch.setattr(sys, "argv", ["pback", *argv])
-    with run_lock(tmp_path):
-        with pytest.raises(SystemExit):
-            cli.main()
+    with run_lock(tmp_path), pytest.raises(SystemExit):
+        cli.main()
     assert ran == []
 
 
@@ -71,7 +69,6 @@ def test_main_quiet_when_lock_recently_taken(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "state_dir", lambda: tmp_path)
     monkeypatch.setattr(cli, "notify", lambda t, m: notes.append(m))
     monkeypatch.setattr(sys, "argv", ["pback", "export", "--notify"])
-    with run_lock(tmp_path):
-        with pytest.raises(SystemExit):
-            cli.main()
+    with run_lock(tmp_path), pytest.raises(SystemExit):
+        cli.main()
     assert notes == []

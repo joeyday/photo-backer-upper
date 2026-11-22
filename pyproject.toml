@@ -9,8 +9,17 @@ description = "Back up iCloud Photos to a main and a secondary backup location, 
 requires-python = ">=3.10"
 dependencies = []
 
+[dependency-groups]
+dev = ["ruff", "pytest"]
+
 [project.scripts]
 pback = "photo_backer_upper.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]

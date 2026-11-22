@@ -1,5 +1,6 @@
 import unittest
-from photo_backer_upper.reconcile import compare, same_photo, candidate_stems, _fraction
+
+from photo_backer_upper.reconcile import _fraction, candidate_stems, compare, same_photo
 
 
 def photo(**kw):

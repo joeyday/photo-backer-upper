@@ -329,5 +329,10 @@ Set `NOTARY_PROFILE` to use a profile name other than `pback-notary`.
 ## Development
 
 ```sh
-uv run --with pytest pytest
+uv run pytest                  # tests
+uv run ruff format --check .   # formatting (drop --check to reformat)
+uv run ruff check .            # lint
 ```
+
+Once per clone, enable the pre-commit hook: `git config core.hooksPath .githooks`. Before each
+commit it runs the three checks above and refuses the commit if any fails; it never rewrites files.

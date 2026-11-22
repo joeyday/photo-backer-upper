@@ -1,5 +1,6 @@
 """Pieces for unattended runs: network share auto-mount, run lock, notifications, launchd agent."""
 
+import contextlib
 import fcntl
 import os
 import plistlib
@@ -7,7 +8,6 @@ import re
 import shutil
 import socket
 import subprocess
-import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -47,7 +47,8 @@ def nas_endpoint(url: str) -> tuple[str, int] | None:
 
 
 def wait_for_nas(url: str, timeout: float = NAS_WAIT_SECONDS) -> bool:
-    """Wait until the share's server accepts connections, e.g. while the network comes up after boot.
+    """Wait until the share's server accepts connections, e.g. while the network comes up after
+    boot.
 
     Returns True as soon as it answers, False if it never does within `timeout` seconds.
     Unparseable URLs return True so the mount call still gets a chance.
@@ -123,7 +124,9 @@ def run_lock(state_dir: Path):
     so a run that finds it busy can tell how long the other one has been going.
     """
     path = state_dir / "pback.lock"
-    f = open(path, "a+")  # not "w": a run that loses the race mustn't wipe the holder's PID or time
+    # Held open across the yield on purpose, so no `with`.
+    # Mode "a+", not "w": a run that loses the race mustn't wipe the holder's PID or time.
+    f = open(path, "a+")  # noqa: SIM115
     try:
         fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -132,7 +135,7 @@ def run_lock(state_dir: Path):
             held = max(0.0, time.time() - path.stat().st_mtime)
         except OSError:
             held = 0.0
-        raise LockBusy("another pback run is already in progress; exiting", held)
+        raise LockBusy("another pback run is already in progress; exiting", held) from None
     try:
         f.seek(0)
         f.truncate()
@@ -154,7 +157,7 @@ STUCK_HOURS = 4
 
 def notify(title: str, message: str) -> None:
     """Best-effort macOS notification; never raises."""
-    try:
+    with contextlib.suppress(Exception):
         subprocess.run(
             [
                 "osascript",
@@ -170,8 +173,6 @@ def notify(title: str, message: str) -> None:
             capture_output=True,
             timeout=15,
         )
-    except Exception:
-        pass
 
 
 # --- mirror free-space guard -----------------------------------------------------------
@@ -277,7 +278,8 @@ def install_agent(state_dir: Path, every_hours: float, load: bool) -> int:
         plistlib.dump(build_agent_plist(pback, log_dir, every_hours), f)
     print(f"Wrote {path}")
     print(
-        f"Runs `pback export --notify` every {every_hours:g} h and at login; log: {log_dir / 'export.log'}"
+        f"Runs `pback export --notify` every {every_hours:g} h and at login; "
+        f"log: {log_dir / 'export.log'}"
     )
     target = f"gui/{os.getuid()}"
     if load:

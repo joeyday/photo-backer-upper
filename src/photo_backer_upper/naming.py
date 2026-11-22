@@ -10,18 +10,19 @@ the import date), fall back to `date`.
 These functions are called by osxphotos with a PhotoInfo, as `{function:naming.py::name}`.
 """
 
-# `date` is stored to the second and `date_original` to the millisecond (and Photos sometimes truncates
-# one and rounds the other), so one instant can differ by up to a couple of seconds.
+# `date` is stored to the second and `date_original` to the millisecond (and Photos sometimes
+# truncates one and rounds the other), so one instant can differ by up to a couple of seconds.
 SAME_INSTANT_SECONDS = 2
 
 
 def choose(date, original):
     """The datetime to name a file from, given a photo's `date` and `date_original`.
 
-    The UTC problem is when `date` is in a different timezone from the local `date_original` but is the
-    same instant. Then use `date_original`'s local wall clock. When both have the same UTC offset there is
-    nothing to fix, so keep `date` exactly (names stay identical to the old `{created}` ones). When
-    `date_original` is a different instant altogether (e.g. an import date), also keep `date`.
+    The UTC problem is when `date` is in a different timezone from the local `date_original` but
+    is the same instant. Then use `date_original`'s local wall clock. When both have the same UTC
+    offset there is nothing to fix, so keep `date` exactly (names stay identical to the old
+    `{created}` ones). When `date_original` is a different instant altogether (e.g. an import
+    date), also keep `date`.
     """
     if (
         date

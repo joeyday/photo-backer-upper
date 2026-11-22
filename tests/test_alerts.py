@@ -1,5 +1,6 @@
-from photo_backer_upper.alerts import REALERT_DAYS, describe, due_alerts, missing_this_run
 from test_unavailable import make_db
+
+from photo_backer_upper.alerts import REALERT_DAYS, describe, due_alerts, missing_this_run
 
 T = "2026-11-21 18:00:01.000"
 
@@ -40,5 +41,6 @@ def test_describe():
         == "1 photo couldn't be downloaded from iCloud and isn't backed up yet (retrying next run)"
     )
     assert describe(["x.heic", "y.jpg", "z.mov"]) == (
-        "2 photos and 1 video couldn't be downloaded from iCloud and aren't backed up yet (retrying next run)"
+        "2 photos and 1 video couldn't be downloaded from iCloud and aren't backed up yet "
+        "(retrying next run)"
     )

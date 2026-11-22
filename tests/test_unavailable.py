@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 from photo_backer_upper import cli
@@ -95,7 +96,7 @@ def test_cmd_export_runs_second_pass_with_skip_live(tmp_path, monkeypatch):
 
     main, live = calls
     merged = main[main.index("--skip-uuid-from-file") + 1]
-    assert open(merged).read().split() == ["S1", "L1"]
+    assert Path(merged).read_text().split() == ["S1", "L1"]
     assert "--skip-live" not in main
     assert live[live.index("--skip-uuid-from-file") + 1] == str(state / "skip-uuids.txt")
     assert live[live.index("--uuid-from-file") + 1] == str(state / LIVE_UNAVAILABLE_FILE)
@@ -136,7 +137,6 @@ def test_cmd_export_fails_on_file_errors(tmp_path, monkeypatch, capsys):
 
 
 def test_cmd_export_reports_missing(tmp_path, monkeypatch, capsys):
-    from photo_backer_upper import alerts
 
     archive = tmp_path / "archive"
     archive.mkdir()

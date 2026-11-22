@@ -49,7 +49,8 @@ def load_library(library: str = None) -> list:
         cmd += ["--db", library]
     out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
     photos = json.loads(out)
-    # Same filter as `export`: ignore items merely "Shared with You" that weren't saved to the library.
+    # Same filter as `export`: ignore items merely "Shared with You" that weren't saved to the
+    # library.
     return [p for p in photos if not (p.get("syndicated") and not p.get("saved_to_library"))]
 
 
@@ -158,7 +159,8 @@ def reconcile(main_dir: Path, state_dir: Path, library: str = None, dry_run: boo
 
     needed = sorted({f for files in candidates.values() for f in files})
     print(
-        f"Comparing {len(photos)} library items against {len(needed)} name-matched archive files...",
+        f"Comparing {len(photos)} library items against {len(needed)} name-matched "
+        "archive files...",
         flush=True,
     )
     meta = read_archive_metadata(needed)

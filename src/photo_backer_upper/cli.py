@@ -32,7 +32,8 @@ from .unavailable import (
     write_merged_skip,
 )
 
-# Names come from local capture time (see naming.py), not osxphotos' {created}, which is UTC for some items.
+# Names come from local capture time (see naming.py), not osxphotos' {created}, which is UTC for
+# some items.
 NAMING_FILE = Path(__file__).with_name("naming.py")
 DIRECTORY_TEMPLATE = f"{{function:{NAMING_FILE}::capture_month}}"
 FILENAME_TEMPLATE = f"{{function:{NAMING_FILE}::capture_name}}"
