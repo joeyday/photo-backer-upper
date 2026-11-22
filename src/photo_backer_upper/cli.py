@@ -20,6 +20,7 @@ from .automation import (
     run_lock,
     uninstall_agent,
 )
+from .exportdb import EXPORT_DB_FILE
 from .fixdates import fix_dates, undo
 from .fixexport import fix_export_names
 from .reconcile import SKIP_FILE, reconcile
@@ -92,7 +93,7 @@ def cmd_export(args) -> int:
     require_tool("osxphotos", "Install it with: uv tool install osxphotos")
     main_dir = main_archive()
 
-    export_db = state_dir() / "export.db"
+    export_db = state_dir() / EXPORT_DB_FILE
     # fmt: off
     cmd = [
         "osxphotos", "export", str(main_dir),
@@ -120,16 +121,16 @@ def cmd_export(args) -> int:
         not skip_file.exists()
         and not args.dry_run
         and any(main_dir.iterdir())
-        and not getattr(args, "skip_reconcile_check", False)
+        and not args.skip_reconcile_check
     ):
         raise ConfigError(
             "The main archive already has files but no reconcile has been run on this Mac, "
             "so export would duplicate them. Run `pback reconcile` first "
             "(or pass --skip-reconcile-check)."
         )
-    if getattr(args, "from_date", None):
+    if args.from_date:
         cmd += ["--from-date", args.from_date]
-    if getattr(args, "to_date", None):
+    if args.to_date:
         cmd += ["--to-date", args.to_date]
     if args.dry_run:
         cmd.append("--dry-run")
@@ -181,7 +182,7 @@ def report_missing(args, export_db: Path, started: str) -> None:
     print(f"NOT BACKED UP: {describe(missing)}:", flush=True)
     for f in missing:
         print(f"  {f}", flush=True)
-    if due and getattr(args, "notify", False):
+    if due and args.notify:
         notify("pback: not backed up", f"{describe(due)}. See the export log for the file names.")
 
 
@@ -239,19 +240,14 @@ def cmd_mirror(args) -> int:
     main_dir = main_archive()
     secondary_dir.mkdir(parents=True, exist_ok=True)
 
-    base = ["rsync", "-a"] + (["--delete-during"] if args.delete else [])
-    base += [f"{main_dir}/", f"{secondary_dir}/"]
-    if not args.dry_run and not getattr(args, "skip_space_check", False):
+    delete = ["--delete-during"] if args.delete else []
+    paths = [f"{main_dir}/", f"{secondary_dir}/"]
+    if not args.dry_run and not args.skip_space_check:
         # Refuse up front if it can't fit, rather than failing mid-copy with files already deleted.
-        check_free_space(base, secondary_dir)
+        check_free_space(["rsync", "-a", *delete, *paths], secondary_dir)
 
-    cmd = ["rsync", "-ah", "--info=progress2"]
-    if args.delete:
-        cmd.append("--delete-during")
-    if args.dry_run:
-        cmd.append("--dry-run")
-    cmd += [f"{main_dir}/", f"{secondary_dir}/"]
-    return run_cmd(cmd)
+    dry_run = ["--dry-run"] if args.dry_run else []
+    return run_cmd(["rsync", "-ah", "--info=progress2", *delete, *dry_run, *paths])
 
 
 def cmd_run(args) -> int:
@@ -279,6 +275,17 @@ def cmd_uninstall_agent(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pback", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
+    # Defaults for flags that only some commands define, so the code can read them from any
+    # command's arguments (`run` passes its arguments to both export and mirror). A command that
+    # defines the flag overrides its default.
+    p.set_defaults(
+        notify=False,
+        skip_reconcile_check=False,
+        from_date=None,
+        to_date=None,
+        skip_space_check=False,
+        delete=False,
+    )
 
     def add(name, func, help_, delete=False, notify_flag=True):
         sp = sub.add_parser(name, help=help_)
@@ -360,8 +367,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    if args.command == "run":
-        args.delete = False
     try:
         if args.command in LOCKED_COMMANDS:
             with run_lock(state_dir()):
@@ -371,7 +376,7 @@ def main() -> None:
     except LockBusy as e:
         print(e)
         hours = e.held_seconds / 3600
-        if hours >= STUCK_HOURS and getattr(args, "notify", False):
+        if hours >= STUCK_HOURS and args.notify:
             # Repeats every scheduled run, so a stuck run (even a manual one) isn't forgotten.
             notify(
                 "pback",
@@ -381,19 +386,19 @@ def main() -> None:
         sys.exit(0)
     except ConfigError as e:
         print(f"error: {e}", file=sys.stderr)
-        if getattr(args, "notify", False):
+        if args.notify:
             notify("pback", f"Failed: {e}")
         sys.exit(2)
     except Exception as e:
         # Anything unexpected (a failed osxphotos query, a network share dropping mid-run, a bad
         # database...) would otherwise only leave a traceback in a log nobody reads.
-        if getattr(args, "notify", False):
+        if args.notify:
             notify(
                 "pback",
                 f"{args.command} crashed ({type(e).__name__}); see the log in the state folder",
             )
         raise
-    if rc and getattr(args, "notify", False):
+    if rc and args.notify:
         notify("pback", f"{args.command} failed (exit {rc}); see the log in the state folder")
     sys.exit(rc)
 

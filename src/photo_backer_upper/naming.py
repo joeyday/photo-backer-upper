@@ -14,6 +14,11 @@ These functions are called by osxphotos with a PhotoInfo, as `{function:naming.p
 # truncates one and rounds the other), so one instant can differ by up to a couple of seconds.
 SAME_INSTANT_SECONDS = 2
 
+# The capture-time format of the archive's file names, and a regex fragment that matches it. Other
+# modules build their name patterns from the fragment.
+TIMESTAMP_FMT = "%Y-%m-%d_%H-%M-%S"
+TIMESTAMP_PATTERN = r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}"
+
 
 def choose(date, original):
     """The datetime to name a file from, given a photo's `date` and `date_original`.
@@ -39,7 +44,7 @@ def capture_datetime(photo):
 
 
 def capture_name(photo, **kwargs):
-    return capture_datetime(photo).strftime("%Y-%m-%d_%H-%M-%S")
+    return capture_datetime(photo).strftime(TIMESTAMP_FMT)
 
 
 def capture_month(photo, **kwargs):

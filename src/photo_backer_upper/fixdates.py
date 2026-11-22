@@ -30,11 +30,11 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-VIDEO_EXTS = {".mov", ".mp4", ".m4v"}
-PHOTO_EXTS = {".jpg", ".jpeg", ".heic", ".png", ".tif", ".tiff", ".gif", ".webp", ".avif"}
-DATE_FMT = "%Y-%m-%d_%H-%M-%S"
-STAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
-DATE_NAME_RE = re.compile(r"^(?:mod_)?(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})(?:-\d+| \(\d+\))?$")
+from .media import PHOTO_EXTS, VIDEO_EXTS
+from .naming import TIMESTAMP_FMT, TIMESTAMP_PATTERN
+
+STAMP_RE = re.compile("^" + TIMESTAMP_PATTERN + "$")
+DATE_NAME_RE = re.compile(r"^(?:mod_)?(" + TIMESTAMP_PATTERN + r")(?:-\d+| \(\d+\))?$")
 CAMERA_NAME_RE = re.compile(
     r"^(?:(?:IMG|DSC[NF]?|PXL|MVI|VID|PICT|SAM|P)[_-]?\d|\d{3}[_-]\d{4}|\d{8}[_-]\d{6}"
     r"|\d{4}[-_.]\d{2}[-_.]\d{2}[ _-]\d{2}[-_.]\d{2}[-_.]\d{2})",
@@ -42,7 +42,7 @@ CAMERA_NAME_RE = re.compile(
 )
 MONTH_DIR_RE = re.compile(r"^\d{4}-\d{2}$")
 # osxphotos' name for the edited copy of an item: "<date>_edited", maybe with " (N)".
-EDITED_NAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_edited(?: \(\d+\))?$")
+EDITED_NAME_RE = re.compile("^" + TIMESTAMP_PATTERN + r"_edited(?: \(\d+\))?$")
 CHUNK = 200
 
 
@@ -50,7 +50,7 @@ def valid_stamp(value) -> bool:
     if not isinstance(value, str) or not STAMP_RE.match(value):
         return False
     try:
-        return datetime.strptime(value, DATE_FMT).year >= 1990
+        return datetime.strptime(value, TIMESTAMP_FMT).year >= 1990
     except ValueError:
         return False
 
@@ -71,7 +71,7 @@ def exiftool_json(paths: list, tags: list, group: bool) -> dict:
     rows = {}
     for i in range(0, len(paths), CHUNK):
         chunk = paths[i : i + CHUNK]
-        cmd = ["exiftool", "-json", "-d", DATE_FMT, "-m", "-fast", *tags, *map(str, chunk)]
+        cmd = ["exiftool", "-json", "-d", TIMESTAMP_FMT, "-m", "-fast", *tags, *map(str, chunk)]
         if group:
             cmd.insert(2, "-G1")
         proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -181,8 +181,8 @@ def plan_files(main_dir, paths, info, kind, include_other, taken, plan, skipped)
             continue
         taken[target] = size
         if m:
-            old = datetime.strptime(m.group(1), DATE_FMT)
-            delta = abs((old - datetime.strptime(stamp, DATE_FMT)).total_seconds())
+            old = datetime.strptime(m.group(1), TIMESTAMP_FMT)
+            delta = abs((old - datetime.strptime(stamp, TIMESTAMP_FMT)).total_seconds())
             why = (
                 "UTC-offset"
                 if delta and delta % 3600 == 0 and delta <= 14 * 3600

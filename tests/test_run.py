@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 
 from photo_backer_upper import cli
@@ -7,7 +5,7 @@ from photo_backer_upper.automation import ConfigError
 
 
 def run_args():
-    return SimpleNamespace(dry_run=False, delete=False, notify=True, skip_space_check=False)
+    return cli.build_parser().parse_args(["run", "--notify"])
 
 
 @pytest.fixture

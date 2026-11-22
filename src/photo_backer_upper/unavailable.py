@@ -11,10 +11,10 @@ cleared after RETRY_DAYS without changes so each video gets another chance in ca
 starts providing it.
 """
 
-import sqlite3
 import time
 from pathlib import Path
 
+from . import exportdb
 from .atomic import write_text_atomic
 
 LIVE_UNAVAILABLE_FILE = "live-unavailable-uuids.txt"
@@ -53,21 +53,9 @@ def missing_live_uuids(export_db: Path, since_utc: str) -> set[str]:
     """
     if not export_db.exists():
         return set()
-    con = sqlite3.connect(f"file:{export_db}?mode=ro", uri=True)
-    try:
-        rows = con.execute(
-            "select hp.uuid, hp.filepath_normalized from history h "
-            "join history_path hp on hp.id = h.filepath_id "
-            "where h.action = 'missing' and h.datetime >= ?",
-            (since_utc,),
-        ).fetchall()
-        stills = {
-            uuid
-            for uuid, path in con.execute("select uuid, filepath_normalized from export_data")
-            if not path.lower().endswith(".mov")
-        }
-    finally:
-        con.close()
+    with exportdb.connect(export_db) as con:
+        rows = exportdb.missing_since(con, since_utc)
+        stills = exportdb.stills(con)
     return {uuid for uuid, path in rows if path.lower().endswith("_edited.mov") and uuid in stills}
 
 

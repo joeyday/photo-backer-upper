@@ -11,27 +11,23 @@ free ` (N)`. Every rename is written to an undo log (the same format as fix-date
 export doesn't recreate them under the old names.
 """
 
-import json
 import re
-import sqlite3
-import subprocess
 import unicodedata
 from datetime import datetime
 from pathlib import Path
 
+from . import exportdb
 from .atomic import write_text_atomic
-from .naming import choose
+from .library import load_library
+from .naming import TIMESTAMP_FMT, TIMESTAMP_PATTERN, choose
 from .reconcile import SKIP_FILE
 
-FMT = "%Y-%m-%d_%H-%M-%S"
-NAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})(.*)$")
+NAME_RE = re.compile("^(" + TIMESTAMP_PATTERN + ")(.*)$")
 
 
 def _lib_dates(library):
-    cmd = ["osxphotos", "query", "--json"] + (["--db", library] if library else [])
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
     dates = {}
-    for p in json.loads(out):
+    for p in load_library(library):
         if p.get("date"):
             o = datetime.fromisoformat(p["date_original"]) if p.get("date_original") else None
             dates[p["uuid"]] = (datetime.fromisoformat(p["date"]), o)
@@ -43,13 +39,12 @@ def _taken(path: Path, planned: set) -> bool:
 
 
 def fix_export_names(main_dir: Path, state_dir: Path, library=None, apply=False) -> int:
-    db = state_dir / "export.db"
+    db = state_dir / exportdb.EXPORT_DB_FILE
     if not db.exists():
         print("No export database found; nothing to do.")
         return 0
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    rows = con.execute("select uuid, filepath from export_data order by id").fetchall()
-    con.close()
+    with exportdb.connect(db) as con:
+        rows = exportdb.exported_files(con)
     dates = _lib_dates(library)
 
     plan, planned, other = (
@@ -63,8 +58,8 @@ def fix_export_names(main_dir: Path, state_dir: Path, library=None, apply=False)
             other["no library item"] += 1
             continue
         date, original = dates[uuid]
-        old_base, new_dt = date.strftime(FMT), choose(date, original)
-        new_base = new_dt.strftime(FMT)
+        old_base, new_dt = date.strftime(TIMESTAMP_FMT), choose(date, original)
+        new_base = new_dt.strftime(TIMESTAMP_FMT)
         src = main_dir / unicodedata.normalize("NFC", rel)
         m = NAME_RE.match(Path(rel).stem)
         if not m or m.group(1) != old_base:

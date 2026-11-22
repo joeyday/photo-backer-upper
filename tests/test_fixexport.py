@@ -10,12 +10,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from photo_backer_upper import fixdates, fixexport
+from photo_backer_upper import fixdates, fixexport, library
 
 # --- Fakes and helpers. Every patch is here, so a later step retargets it in one place. ---
 
 # The module that runs `osxphotos query --json` (`library` after #13).
-LIBRARY_QUERY_MODULE = fixexport
+LIBRARY_QUERY_MODULE = library
 
 
 @pytest.fixture

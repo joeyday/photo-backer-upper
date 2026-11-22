@@ -14,7 +14,9 @@ import sqlite3
 import time
 from pathlib import Path, PurePosixPath
 
+from . import exportdb
 from .atomic import write_text_atomic
+from .media import VIDEO_EXTS
 
 ALERT_STATE_FILE = "missing-alerts.json"
 REALERT_DAYS = 7
@@ -31,21 +33,9 @@ def missing_this_run(export_db: Path, since_utc: str) -> list[str]:
     """Archive paths (relative) that export recorded as missing at or after `since_utc`."""
     if not export_db.exists():
         return []
-    con = sqlite3.connect(f"file:{export_db}?mode=ro", uri=True)
-    try:
-        rows = con.execute(
-            "select distinct hp.uuid, hp.filepath_normalized from history h "
-            "join history_path hp on hp.id = h.filepath_id "
-            "where h.action = 'missing' and h.datetime >= ?",
-            (since_utc,),
-        ).fetchall()
-        stills = {
-            uuid
-            for uuid, path in con.execute("select uuid, filepath_normalized from export_data")
-            if not path.lower().endswith(".mov")
-        }
-    finally:
-        con.close()
+    with exportdb.connect(export_db) as con:
+        rows = exportdb.missing_since(con, since_utc)
+        stills = exportdb.stills(con)
     return sorted(path for uuid, path in rows if not _is_ignored(path, stills, uuid))
 
 
@@ -81,7 +71,7 @@ def due_alerts(state_dir: Path, missing: list[str], now: float | None = None) ->
 
 
 def describe(files: list[str]) -> str:
-    videos = sum(1 for f in files if f.lower().endswith((".mov", ".mp4", ".m4v")))
+    videos = sum(1 for f in files if f.lower().endswith(tuple(VIDEO_EXTS)))
     photos = len(files) - videos
     parts = [
         f"{n} {word}{'s' if n != 1 else ''}"

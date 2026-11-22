@@ -102,6 +102,9 @@ The schedule only exports to the main backup location. Copying to the secondary 
 | Missing-file alerts | `alerts.py` | Finds files a run couldn't download from iCloud and decides when to notify. |
 | Unavailable Live Photo videos | `unavailable.py` | Keeps a list of Live Photos whose video iCloud doesn't deliver. |
 | Safe file writes | `atomic.py` | Replaces state files whole, so an interrupted write never leaves half a file. |
+| Export database | `exportdb.py` | Reads osxphotos' export database: the files a run recorded as missing, and the files export has written. |
+| Library query | `library.py` | Runs `osxphotos query` to list the library's items, leaving out ones merely "Shared with You". |
+| File types | `media.py` | The file extensions counted as videos and as photos. |
 | Reconcile | `reconcile.py` | One-time: works out which library photos are already in the backup. |
 | Fix dates | `fixdates.py` | One-time: renames files in the backup to their embedded capture date. |
 | Fix export names | `fixexport.py` | One-time: renames files an earlier version of export named in UTC. |

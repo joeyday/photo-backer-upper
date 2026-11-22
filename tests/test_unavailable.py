@@ -1,7 +1,6 @@
 import os
 import sqlite3
 from pathlib import Path
-from types import SimpleNamespace
 
 from photo_backer_upper import cli
 from photo_backer_upper.unavailable import (
@@ -92,7 +91,7 @@ def test_cmd_export_runs_second_pass_with_skip_live(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "run_cmd", lambda cmd: calls.append(cmd) or 0)
     monkeypatch.setattr(cli.config, "get", lambda *a, **k: None)
 
-    assert cli.cmd_export(SimpleNamespace(dry_run=False)) == 0
+    assert cli.cmd_export(cli.build_parser().parse_args(["export"])) == 0
 
     main, live = calls
     merged = main[main.index("--skip-uuid-from-file") + 1]
@@ -129,7 +128,7 @@ def test_cmd_export_fails_on_file_errors(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "run_cmd", fake_osxphotos)
     monkeypatch.setattr(cli.config, "get", lambda *a, **k: None)
 
-    assert cli.cmd_export(SimpleNamespace(dry_run=False)) == 1
+    assert cli.cmd_export(cli.build_parser().parse_args(["export"])) == 1
     out = capsys.readouterr().out
     assert "EXPORT ERRORS: 1 file(s)" in out
     assert "/a/2025-01/bad.heic: disk full" in out
@@ -152,11 +151,11 @@ def test_cmd_export_reports_missing(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "missing_this_run", lambda db, since: ["2025-01/a.mov"])
     monkeypatch.setattr(cli, "notify", lambda t, m: notes.append(m))
 
-    assert cli.cmd_export(SimpleNamespace(dry_run=False, notify=True)) == 0
+    assert cli.cmd_export(cli.build_parser().parse_args(["export", "--notify"])) == 0
     assert "NOT BACKED UP: 1 video" in capsys.readouterr().out
     assert notes == [
         "1 video couldn't be downloaded from iCloud and isn't backed up yet (retrying next run). "
         "See the export log for the file names."
     ]
-    cli.cmd_export(SimpleNamespace(dry_run=False, notify=True))
+    cli.cmd_export(cli.build_parser().parse_args(["export", "--notify"]))
     assert len(notes) == 1  # not re-alerted the next run

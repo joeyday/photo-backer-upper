@@ -21,9 +21,10 @@ from datetime import datetime
 from pathlib import Path
 
 from .atomic import write_text_atomic
+from .library import load_library
+from .naming import TIMESTAMP_FMT, TIMESTAMP_PATTERN
 
-STEM_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})(?:-\d+| \(\d+\))?$")
-STEM_FMT = "%Y-%m-%d_%H-%M-%S"
+STEM_RE = re.compile("^(" + TIMESTAMP_PATTERN + r")(?:-\d+| \(\d+\))?$")
 SKIP_FILE = "skip-uuids.txt"
 UNCONFIRMED_FILE = "reconcile-unconfirmed.tsv"
 EXIF_TAGS = ["-SubSecDateTimeOriginal", "-Model", "-ImageWidth", "-ImageHeight", "-Duration"]
@@ -43,17 +44,6 @@ def index_archive(main_dir: Path) -> dict:
     return stems
 
 
-def load_library(library: str = None) -> list:
-    cmd = ["osxphotos", "query", "--json"]
-    if library:
-        cmd += ["--db", library]
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
-    photos = json.loads(out)
-    # Same filter as `export`: ignore items merely "Shared with You" that weren't saved to the
-    # library.
-    return [p for p in photos if not (p.get("syndicated") and not p.get("saved_to_library"))]
-
-
 def candidate_stems(photo: dict) -> list:
     """Possible archive stems for a photo, best first.
 
@@ -64,7 +54,7 @@ def candidate_stems(photo: dict) -> list:
     stems = []
     for key in ("date_original", "date"):
         if photo.get(key):
-            s = datetime.fromisoformat(photo[key]).strftime(STEM_FMT)
+            s = datetime.fromisoformat(photo[key]).strftime(TIMESTAMP_FMT)
             if s not in stems:
                 stems.append(s)
     return stems
