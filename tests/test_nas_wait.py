@@ -25,6 +25,7 @@ def test_wait_for_nas_succeeds_when_listening():
 def test_wait_for_nas_gives_up(monkeypatch):
     def refuse(*a, **k):
         raise OSError("no route")
+
     monkeypatch.setattr(automation.socket, "create_connection", refuse)
     monkeypatch.setattr(automation.time, "sleep", lambda s: None)
     assert not wait_for_nas("smb://10.0.0.5/X", timeout=0)

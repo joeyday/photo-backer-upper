@@ -18,7 +18,7 @@ def test_busy_lock_reports_holder_age_and_keeps_its_pid(tmp_path):
             with run_lock(tmp_path):
                 pass
         assert busy.value.held_seconds >= 5 * 3600 - 5
-        assert path.read_text() == str(os.getpid())   # the loser didn't truncate it
+        assert path.read_text() == str(os.getpid())  # the loser didn't truncate it
 
 
 def test_main_notifies_when_lock_held_too_long(tmp_path, monkeypatch):

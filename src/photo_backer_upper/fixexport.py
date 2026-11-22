@@ -52,7 +52,11 @@ def fix_export_names(main_dir: Path, state_dir: Path, library=None, apply=False)
     con.close()
     dates = _lib_dates(library)
 
-    plan, planned, other = [], set(), {"already right": 0, "file missing": 0, "unexpected name": 0, "no library item": 0}
+    plan, planned, other = (
+        [],
+        set(),
+        {"already right": 0, "file missing": 0, "unexpected name": 0, "no library item": 0},
+    )
     fixed_uuids = set()
     for uuid, rel in rows:
         if uuid not in dates:
@@ -85,7 +89,9 @@ def fix_export_names(main_dir: Path, state_dir: Path, library=None, apply=False)
     moved_month = sum(1 for _u, s, d in plan if s.parent.name != d.parent.name)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     report = state_dir / f"fix-export-names-report-{stamp}.tsv"
-    report.write_text("".join(f"{u}\t{s.relative_to(main_dir)}\t{d.relative_to(main_dir)}\n" for u, s, d in plan))
+    report.write_text(
+        "".join(f"{u}\t{s.relative_to(main_dir)}\t{d.relative_to(main_dir)}\n" for u, s, d in plan)
+    )
     print(f"Files recorded by earlier exports:      {len(rows)}")
     print(f"  to rename (UTC name -> local time):   {len(plan)} files for {len(fixed_uuids)} items")
     print(f"    of which move to another month:     {moved_month}")

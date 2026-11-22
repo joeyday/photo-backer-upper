@@ -23,8 +23,12 @@ def choose(date, original):
     nothing to fix, so keep `date` exactly (names stay identical to the old `{created}` ones). When
     `date_original` is a different instant altogether (e.g. an import date), also keep `date`.
     """
-    if (date and original and date.utcoffset() != original.utcoffset()
-            and abs((date - original).total_seconds()) <= SAME_INSTANT_SECONDS):
+    if (
+        date
+        and original
+        and date.utcoffset() != original.utcoffset()
+        and abs((date - original).total_seconds()) <= SAME_INSTANT_SECONDS
+    ):
         return original
     return date
 

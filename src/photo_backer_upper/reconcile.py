@@ -73,16 +73,21 @@ def read_archive_metadata(paths: list) -> dict:
     """Read the comparison tags for archive files with exiftool, in batches."""
     meta = {}
     for i in range(0, len(paths), BATCH):
-        chunk = paths[i:i + BATCH]
+        chunk = paths[i : i + BATCH]
         with tempfile.NamedTemporaryFile("w", suffix=".args", encoding="utf-8") as af:
             af.write("".join(f"{p}\n" for p in chunk))
             af.flush()
             out = subprocess.run(
                 ["exiftool", "-j", "-n", "-charset", "filename=utf8", *EXIF_TAGS, "-@", af.name],
-                capture_output=True, text=True).stdout
+                capture_output=True,
+                text=True,
+            ).stdout
         for d in json.loads(out or "[]"):
             meta[Path(d["SourceFile"])] = d
-        print(f"  read metadata for {min(i + BATCH, len(paths))}/{len(paths)} archive files", flush=True)
+        print(
+            f"  read metadata for {min(i + BATCH, len(paths))}/{len(paths)} archive files",
+            flush=True,
+        )
     return meta
 
 
@@ -100,7 +105,10 @@ def compare(photo: dict, meta: dict):
     if lib_model and arc_model:
         (agree if lib_model == arc_model else differ).add("model")
 
-    lib_frac, arc_frac = _fraction(photo.get("date_original")), _fraction(meta.get("SubSecDateTimeOriginal"))
+    lib_frac, arc_frac = (
+        _fraction(photo.get("date_original")),
+        _fraction(meta.get("SubSecDateTimeOriginal")),
+    )
     if lib_frac and arc_frac and not (lib_frac == "00" and arc_frac == "00"):
         (agree if lib_frac == arc_frac else differ).add("subsec")
 
@@ -149,7 +157,10 @@ def reconcile(main_dir: Path, state_dir: Path, library: str = None, dry_run: boo
         candidates[p["uuid"]] = files
 
     needed = sorted({f for files in candidates.values() for f in files})
-    print(f"Comparing {len(photos)} library items against {len(needed)} name-matched archive files...", flush=True)
+    print(
+        f"Comparing {len(photos)} library items against {len(needed)} name-matched archive files...",
+        flush=True,
+    )
     meta = read_archive_metadata(needed)
 
     # Each archive file can vouch for only one library item. Items with the fewest
@@ -160,7 +171,9 @@ def reconcile(main_dir: Path, state_dir: Path, library: str = None, dry_run: boo
         if not files:
             not_in_archive.append(p)
             continue
-        match = next((f for f in files if f not in claimed and same_photo(p, meta.get(f, {}))), None)
+        match = next(
+            (f for f in files if f not in claimed and same_photo(p, meta.get(f, {}))), None
+        )
         if match:
             claimed.add(match)
             skip.append(p)
@@ -178,13 +191,20 @@ def reconcile(main_dir: Path, state_dir: Path, library: str = None, dry_run: boo
     report = state_dir / UNCONFIRMED_FILE
     if dry_run:
         for p, files in unconfirmed[:5]:
-            print(f"    e.g. {p.get('original_filename')} {p.get('date_original')} vs {files[0].name}")
+            print(
+                f"    e.g. {p.get('original_filename')} {p.get('date_original')} vs {files[0].name}"
+            )
         print("Dry run: skip list and report not written.")
         return 0
     state_dir.mkdir(parents=True, exist_ok=True)
-    write_text_atomic(report, "".join(
-        f"{p['uuid']}\t{p.get('original_filename')}\t{p.get('date_original')}\t"
-        f"{';'.join(str(f.relative_to(main_dir)) for f in files)}\n" for p, files in unconfirmed))
+    write_text_atomic(
+        report,
+        "".join(
+            f"{p['uuid']}\t{p.get('original_filename')}\t{p.get('date_original')}\t"
+            f"{';'.join(str(f.relative_to(main_dir)) for f in files)}\n"
+            for p, files in unconfirmed
+        ),
+    )
     path = state_dir / SKIP_FILE
     write_text_atomic(path, "".join(f"{p['uuid']}\n" for p in skip))
     print(f"Wrote {len(skip)} UUIDs to {path}")

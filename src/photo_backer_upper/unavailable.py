@@ -58,10 +58,14 @@ def missing_live_uuids(export_db: Path, since_utc: str) -> set[str]:
         rows = con.execute(
             "select hp.uuid, hp.filepath_normalized from history h "
             "join history_path hp on hp.id = h.filepath_id "
-            "where h.action = 'missing' and h.datetime >= ?", (since_utc,)).fetchall()
-        stills = {uuid for uuid, path in con.execute(
-            "select uuid, filepath_normalized from export_data")
-            if not path.lower().endswith(".mov")}
+            "where h.action = 'missing' and h.datetime >= ?",
+            (since_utc,),
+        ).fetchall()
+        stills = {
+            uuid
+            for uuid, path in con.execute("select uuid, filepath_normalized from export_data")
+            if not path.lower().endswith(".mov")
+        }
     finally:
         con.close()
     return {uuid for uuid, path in rows if path.lower().endswith("_edited.mov") and uuid in stills}

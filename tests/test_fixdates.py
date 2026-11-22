@@ -4,10 +4,18 @@ from photo_backer_upper.fixdates import scan
 
 def test_scan_skips_osxphotos_edited_copies(tmp_path):
     (tmp_path / "2025-06").mkdir()
-    for n in ("2025-06-01_19-28-39_edited.heic", "2025-06-03_18-29-34_edited (1).mov",
-              "2025-06-01_19-28-39.heic", "IMG_1234.JPG", ".hidden.jpg"):
+    for n in (
+        "2025-06-01_19-28-39_edited.heic",
+        "2025-06-03_18-29-34_edited (1).mov",
+        "2025-06-01_19-28-39.heic",
+        "IMG_1234.JPG",
+        ".hidden.jpg",
+    ):
         (tmp_path / "2025-06" / n).write_bytes(b"x")
-    assert [p.name for p in scan(tmp_path, True, True)] == ["2025-06-01_19-28-39.heic", "IMG_1234.JPG"]
+    assert [p.name for p in scan(tmp_path, True, True)] == [
+        "2025-06-01_19-28-39.heic",
+        "IMG_1234.JPG",
+    ]
 
 
 def test_apply_never_overwrites_a_name_taken_after_planning(tmp_path, monkeypatch, capsys):

@@ -37,7 +37,9 @@ STAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
 DATE_NAME_RE = re.compile(r"^(?:mod_)?(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})(?:-\d+| \(\d+\))?$")
 CAMERA_NAME_RE = re.compile(
     r"^(?:(?:IMG|DSC[NF]?|PXL|MVI|VID|PICT|SAM|P)[_-]?\d|\d{3}[_-]\d{4}|\d{8}[_-]\d{6}"
-    r"|\d{4}[-_.]\d{2}[-_.]\d{2}[ _-]\d{2}[-_.]\d{2}[-_.]\d{2})", re.I)
+    r"|\d{4}[-_.]\d{2}[-_.]\d{2}[ _-]\d{2}[-_.]\d{2}[-_.]\d{2})",
+    re.I,
+)
 MONTH_DIR_RE = re.compile(r"^\d{4}-\d{2}$")
 # osxphotos' name for the edited copy of an item: "<date>_edited", maybe with " (N)".
 EDITED_NAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_edited(?: \(\d+\))?$")
@@ -68,7 +70,7 @@ def scan(main_dir: Path, videos: bool, photos: bool) -> list:
 def exiftool_json(paths: list, tags: list, group: bool) -> dict:
     rows = {}
     for i in range(0, len(paths), CHUNK):
-        chunk = paths[i:i + CHUNK]
+        chunk = paths[i : i + CHUNK]
         cmd = ["exiftool", "-json", "-d", DATE_FMT, "-m", "-fast", *tags, *map(str, chunk)]
         if group:
             cmd.insert(2, "-G1")
@@ -152,7 +154,11 @@ def plan_files(main_dir, paths, info, kind, include_other, taken, plan, skipped)
             stamp = row.get("Keys:CreationDate")
             utc_only = not valid_stamp(stamp) and valid_stamp(row.get("QuickTime:CreateDate"))
         if not valid_stamp(stamp):
-            skipped["video: UTC time only (approximate)" if utc_only else f"{kind}: no usable embedded date"] += 1
+            skipped[
+                "video: UTC time only (approximate)"
+                if utc_only
+                else f"{kind}: no usable embedded date"
+            ] += 1
             continue
         m = DATE_NAME_RE.match(path.stem)
         if m and m.group(1) == stamp and not path.name.startswith("mod_"):
@@ -166,8 +172,9 @@ def plan_files(main_dir, paths, info, kind, include_other, taken, plan, skipped)
         if size == 0:
             skipped[f"{kind}: empty file"] += 1
             continue
-        target, dup = free_target(target_folder(main_dir, path, stamp), stamp,
-                                  path.suffix.lower(), size, taken)
+        target, dup = free_target(
+            target_folder(main_dir, path, stamp), stamp, path.suffix.lower(), size, taken
+        )
         if target is None:
             skipped["probable duplicate of existing file (left alone)"] += 1
             plan.append((kind, "duplicate", path, dup, ""))
@@ -176,15 +183,24 @@ def plan_files(main_dir, paths, info, kind, include_other, taken, plan, skipped)
         if m:
             old = datetime.strptime(m.group(1), DATE_FMT)
             delta = abs((old - datetime.strptime(stamp, DATE_FMT)).total_seconds())
-            why = "UTC-offset" if delta and delta % 3600 == 0 and delta <= 14 * 3600 else (
-                "small drift" if delta <= 120 else "far off")
+            why = (
+                "UTC-offset"
+                if delta and delta % 3600 == 0 and delta <= 14 * 3600
+                else ("small drift" if delta <= 120 else "far off")
+            )
         else:
             why = "camera name" if cls == "camera" else "mod_"
         plan.append((kind, "rename", path, target, why))
 
 
-def fix_dates(main_dir: Path, state_dir: Path, apply: bool = False, videos: bool = True,
-              photos: bool = True, include_other_names: bool = False) -> int:
+def fix_dates(
+    main_dir: Path,
+    state_dir: Path,
+    apply: bool = False,
+    videos: bool = True,
+    photos: bool = True,
+    include_other_names: bool = False,
+) -> int:
     state_dir.mkdir(parents=True, exist_ok=True)
     plan, skipped, taken = [], Counter(), {}
 
@@ -213,7 +229,9 @@ def fix_dates(main_dir: Path, state_dir: Path, apply: bool = False, videos: bool
     with open(report, "w") as f:
         f.write("kind\taction\told\tnew\treason\n")
         for kind, action, old, new, why in plan:
-            f.write(f"{kind}\t{action}\t{old.relative_to(main_dir)}\t{new.relative_to(main_dir)}\t{why}\n")
+            f.write(
+                f"{kind}\t{action}\t{old.relative_to(main_dir)}\t{new.relative_to(main_dir)}\t{why}\n"
+            )
 
     print("\nWill rename:")
     for kind in ("video", "photo"):
@@ -222,7 +240,9 @@ def fix_dates(main_dir: Path, state_dir: Path, apply: bool = False, videos: bool
             print(f"  {kind}s: {len(sel)}  ({dict(Counter(p[4] for p in sel))})")
     print(f"  total: {len(renames)}")
     moved = sum(1 for p in renames if p[2].parent != p[3].parent)
-    print(f"  of which move to a different month folder: {moved}; renamed in place: {len(renames) - moved}")
+    print(
+        f"  of which move to a different month folder: {moved}; renamed in place: {len(renames) - moved}"
+    )
     print("Not renamed:")
     for reason, n in skipped.most_common():
         print(f"  {n:>7}  {reason}")
@@ -252,8 +272,10 @@ def fix_dates(main_dir: Path, state_dir: Path, apply: bool = False, videos: bool
             done += 1
     print(f"Renamed {done} files. Undo log: {log}")
     if changed:
-        print(f"Skipped {len(changed)} that changed since the scan (source gone or new name taken); "
-              "run fix-dates again for them:")
+        print(
+            f"Skipped {len(changed)} that changed since the scan (source gone or new name taken); "
+            "run fix-dates again for them:"
+        )
         for old in changed[:20]:
             print(f"  {old.relative_to(main_dir)}")
     return 0

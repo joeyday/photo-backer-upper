@@ -40,7 +40,9 @@ def test_run_fails_when_mirror_refused_for_space(setup, monkeypatch):
     monkeypatch.setattr(cli, "require_tool", lambda *a: None)
 
     def too_big(*a):
-        raise ConfigError("the mirror would copy 2100 GiB but the secondary drive has only 900 GiB free")
+        raise ConfigError(
+            "the mirror would copy 2100 GiB but the secondary drive has only 900 GiB free"
+        )
 
     monkeypatch.setattr(cli, "check_free_space", too_big)
     with pytest.raises(ConfigError, match="2100 GiB"):

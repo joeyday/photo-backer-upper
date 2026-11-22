@@ -3,9 +3,14 @@ import sqlite3
 from types import SimpleNamespace
 
 from photo_backer_upper import cli
-from photo_backer_upper.unavailable import (LIVE_UNAVAILABLE_FILE, RETRY_DAYS,
-                                            load_live_unavailable, missing_live_uuids,
-                                            remember_live_unavailable, write_merged_skip)
+from photo_backer_upper.unavailable import (
+    LIVE_UNAVAILABLE_FILE,
+    RETRY_DAYS,
+    load_live_unavailable,
+    missing_live_uuids,
+    remember_live_unavailable,
+    write_merged_skip,
+)
 
 
 def make_db(path, history, records):
@@ -26,16 +31,29 @@ def make_db(path, history, records):
 
 def test_missing_live_uuids_only_live_photos_from_this_run(tmp_path):
     db = tmp_path / "export.db"
-    make_db(db, history=[
-        ("2026-11/a_edited.mov", "LIVE", "2026-11-21 18:00:01.000", "missing"),
-        ("2026-11/o.mov", "ORIGINAL", "2026-11-21 18:00:01.500", "missing"),  # original live video
-        ("2026-11/v_edited.mov", "VIDEO", "2026-11-21 18:00:02.000", "missing"),  # plain video
-        ("2026-11/b_edited.mov", "OLD", "2026-11-20 18:00:00.000", "missing"),  # earlier run
-        ("2026-11/c_edited.mov", "SKIPPED", "2026-11-21 18:00:03.000", "skip"),
-        ("2026-11/d.heic", "STILL", "2026-11-21 18:00:04.000", "missing"),
-    ], records=[("2026-11/a.heic", "LIVE"), ("2026-11/o.heic", "ORIGINAL"),
-                ("2026-11/b.heic", "OLD"), ("2026-11/c.heic", "SKIPPED"),
-                ("2026-11/x.mov", "VIDEO")])
+    make_db(
+        db,
+        history=[
+            ("2026-11/a_edited.mov", "LIVE", "2026-11-21 18:00:01.000", "missing"),
+            (
+                "2026-11/o.mov",
+                "ORIGINAL",
+                "2026-11-21 18:00:01.500",
+                "missing",
+            ),  # original live video
+            ("2026-11/v_edited.mov", "VIDEO", "2026-11-21 18:00:02.000", "missing"),  # plain video
+            ("2026-11/b_edited.mov", "OLD", "2026-11-20 18:00:00.000", "missing"),  # earlier run
+            ("2026-11/c_edited.mov", "SKIPPED", "2026-11-21 18:00:03.000", "skip"),
+            ("2026-11/d.heic", "STILL", "2026-11-21 18:00:04.000", "missing"),
+        ],
+        records=[
+            ("2026-11/a.heic", "LIVE"),
+            ("2026-11/o.heic", "ORIGINAL"),
+            ("2026-11/b.heic", "OLD"),
+            ("2026-11/c.heic", "SKIPPED"),
+            ("2026-11/x.mov", "VIDEO"),
+        ],
+    )
     assert missing_live_uuids(db, "2026-11-21 18:00:00") == {"LIVE"}
 
 
@@ -96,11 +114,13 @@ def test_cmd_export_fails_on_file_errors(tmp_path, monkeypatch, capsys):
         report = cmd[cmd.index("--report") + 1]
         con = sqlite3.connect(report)
         con.execute("create table report (filename text, error text)")
-        con.executemany("insert into report values (?,?)",
-                        [("/a/2025-01/ok.heic", ""), ("/a/2025-01/bad.heic", "disk full")])
+        con.executemany(
+            "insert into report values (?,?)",
+            [("/a/2025-01/ok.heic", ""), ("/a/2025-01/bad.heic", "disk full")],
+        )
         con.commit()
         con.close()
-        return 0   # osxphotos exits 0 even with file errors
+        return 0  # osxphotos exits 0 even with file errors
 
     monkeypatch.setattr(cli, "main_archive", lambda: archive)
     monkeypatch.setattr(cli, "state_dir", lambda: state)
@@ -117,6 +137,7 @@ def test_cmd_export_fails_on_file_errors(tmp_path, monkeypatch, capsys):
 
 def test_cmd_export_reports_missing(tmp_path, monkeypatch, capsys):
     from photo_backer_upper import alerts
+
     archive = tmp_path / "archive"
     archive.mkdir()
     state = tmp_path / "state"
@@ -133,7 +154,9 @@ def test_cmd_export_reports_missing(tmp_path, monkeypatch, capsys):
 
     assert cli.cmd_export(SimpleNamespace(dry_run=False, notify=True)) == 0
     assert "NOT BACKED UP: 1 video" in capsys.readouterr().out
-    assert notes == ["1 video couldn't be downloaded from iCloud and isn't backed up yet (retrying next run). "
-                     "See the export log for the file names."]
+    assert notes == [
+        "1 video couldn't be downloaded from iCloud and isn't backed up yet (retrying next run). "
+        "See the export log for the file names."
+    ]
     cli.cmd_export(SimpleNamespace(dry_run=False, notify=True))
-    assert len(notes) == 1   # not re-alerted the next run
+    assert len(notes) == 1  # not re-alerted the next run

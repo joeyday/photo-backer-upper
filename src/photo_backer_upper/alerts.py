@@ -36,10 +36,14 @@ def missing_this_run(export_db: Path, since_utc: str) -> list[str]:
         rows = con.execute(
             "select distinct hp.uuid, hp.filepath_normalized from history h "
             "join history_path hp on hp.id = h.filepath_id "
-            "where h.action = 'missing' and h.datetime >= ?", (since_utc,)).fetchall()
-        stills = {uuid for uuid, path in con.execute(
-            "select uuid, filepath_normalized from export_data")
-            if not path.lower().endswith(".mov")}
+            "where h.action = 'missing' and h.datetime >= ?",
+            (since_utc,),
+        ).fetchall()
+        stills = {
+            uuid
+            for uuid, path in con.execute("select uuid, filepath_normalized from export_data")
+            if not path.lower().endswith(".mov")
+        }
     finally:
         con.close()
     return sorted(path for uuid, path in rows if not _is_ignored(path, stills, uuid))
@@ -56,7 +60,8 @@ def export_errors(report: Path) -> list[tuple[str, str]]:
     try:
         return con.execute(
             "select filename, error from report where error is not null and error != '' "
-            "order by filename").fetchall()
+            "order by filename"
+        ).fetchall()
     finally:
         con.close()
 
@@ -78,7 +83,13 @@ def due_alerts(state_dir: Path, missing: list[str], now: float | None = None) ->
 def describe(files: list[str]) -> str:
     videos = sum(1 for f in files if f.lower().endswith((".mov", ".mp4", ".m4v")))
     photos = len(files) - videos
-    parts = [f"{n} {word}{'s' if n != 1 else ''}"
-             for n, word in ((photos, "photo"), (videos, "video")) if n]
+    parts = [
+        f"{n} {word}{'s' if n != 1 else ''}"
+        for n, word in ((photos, "photo"), (videos, "video"))
+        if n
+    ]
     verb = "isn't" if len(files) == 1 else "aren't"
-    return " and ".join(parts) + f" couldn't be downloaded from iCloud and {verb} backed up yet (retrying next run)"
+    return (
+        " and ".join(parts)
+        + f" couldn't be downloaded from iCloud and {verb} backed up yet (retrying next run)"
+    )

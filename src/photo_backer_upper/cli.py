@@ -9,13 +9,28 @@ from pathlib import Path
 
 from . import config
 from .alerts import describe, due_alerts, export_errors, missing_this_run
-from .automation import (STUCK_HOURS, ConfigError, LockBusy, check_free_space,
-                         ensure_nas_mounted, install_agent, notify, run_lock, uninstall_agent)
+from .automation import (
+    STUCK_HOURS,
+    ConfigError,
+    LockBusy,
+    check_free_space,
+    ensure_nas_mounted,
+    install_agent,
+    notify,
+    run_lock,
+    uninstall_agent,
+)
 from .fixdates import fix_dates, undo
 from .fixexport import fix_export_names
 from .reconcile import SKIP_FILE, reconcile
-from .unavailable import (LIVE_UNAVAILABLE_FILE, load_live_unavailable, missing_live_uuids,
-                          read_uuids, remember_live_unavailable, write_merged_skip)
+from .unavailable import (
+    LIVE_UNAVAILABLE_FILE,
+    load_live_unavailable,
+    missing_live_uuids,
+    read_uuids,
+    remember_live_unavailable,
+    write_merged_skip,
+)
 
 # Names come from local capture time (see naming.py), not osxphotos' {created}, which is UTC for some items.
 NAMING_FILE = Path(__file__).with_name("naming.py")
@@ -67,7 +82,7 @@ def run_cmd(cmd: list) -> int:
 
 def run_export(cmd: list, report: Path) -> tuple[int, list]:
     """Run an osxphotos export; return its exit status and the files it failed to export."""
-    report.unlink(missing_ok=True)   # never read a previous run's report
+    report.unlink(missing_ok=True)  # never read a previous run's report
     rc = run_cmd(cmd + ["--report", str(report)])
     return rc, export_errors(report)
 
@@ -77,6 +92,7 @@ def cmd_export(args) -> int:
     main_dir = main_archive()
 
     export_db = state_dir() / "export.db"
+    # fmt: off
     cmd = [
         "osxphotos", "export", str(main_dir),
         "--update",
@@ -89,6 +105,7 @@ def cmd_export(args) -> int:
         "--query-eval", "not (photo.syndicated and not photo.saved_to_library)",
         "--verbose",
     ]
+    # fmt: on
     library = config.get("PHOTO_BACKER_UPPER_LIBRARY")
     if library:
         cmd += ["--db", library]
@@ -98,8 +115,12 @@ def cmd_export(args) -> int:
     if skip_file.exists() or live_unavailable:
         merged = write_merged_skip(state_dir(), skip_uuids, live_unavailable)
         cmd += ["--skip-uuid-from-file", str(merged)]
-    if (not skip_file.exists() and not args.dry_run and any(main_dir.iterdir())
-            and not getattr(args, "skip_reconcile_check", False)):
+    if (
+        not skip_file.exists()
+        and not args.dry_run
+        and any(main_dir.iterdir())
+        and not getattr(args, "skip_reconcile_check", False)
+    ):
         raise ConfigError(
             "The main archive already has files but no reconcile has been run on this Mac, "
             "so export would duplicate them. Run `pback reconcile` first "
@@ -120,13 +141,14 @@ def cmd_export(args) -> int:
     if live_unavailable:
         # Their stills still get updated; only the never-delivered video is left out, so
         # osxphotos has nothing to download unless the photo itself changed.
-        print(f"Exporting {len(live_unavailable)} Live Photos without their unavailable video...",
-              flush=True)
+        print(
+            f"Exporting {len(live_unavailable)} Live Photos without their unavailable video...",
+            flush=True,
+        )
         live_cmd = [c for c in cmd if c != "--verbose"]
         i = live_cmd.index("--skip-uuid-from-file")
-        live_cmd[i:i + 2] = (["--skip-uuid-from-file", str(skip_file)] if skip_uuids else [])
-        live_cmd += ["--uuid-from-file", str(state_dir() / LIVE_UNAVAILABLE_FILE),
-                     "--skip-live"]
+        live_cmd[i : i + 2] = ["--skip-uuid-from-file", str(skip_file)] if skip_uuids else []
+        live_cmd += ["--uuid-from-file", str(state_dir() / LIVE_UNAVAILABLE_FILE), "--skip-live"]
         rc, live_errors = run_export(live_cmd, report)
         if rc != 0:
             return rc
@@ -134,8 +156,11 @@ def cmd_export(args) -> int:
     if not args.dry_run:
         new = remember_live_unavailable(state_dir(), missing_live_uuids(export_db, started))
         if new:
-            print(f"{len(new)} Live Photo video(s) iCloud didn't provide; later runs won't "
-                  "re-download those photos for them.", flush=True)
+            print(
+                f"{len(new)} Live Photo video(s) iCloud didn't provide; later runs won't "
+                "re-download those photos for them.",
+                flush=True,
+            )
         report_missing(args, export_db, started)
     if errors:
         # osxphotos exits 0 even when files fail, so fail the run here (which also notifies).
@@ -173,15 +198,22 @@ def cmd_fix_dates(args) -> int:
     main_dir = main_archive()
     # With neither --videos nor --photos, handle both.
     both = not args.videos and not args.photos
-    return fix_dates(main_dir, state_dir(), apply=args.apply,
-                     videos=args.videos or both, photos=args.photos or both,
-                     include_other_names=args.include_other_names)
+    return fix_dates(
+        main_dir,
+        state_dir(),
+        apply=args.apply,
+        videos=args.videos or both,
+        photos=args.photos or both,
+        include_other_names=args.include_other_names,
+    )
 
 
 def cmd_fix_export_names(args) -> int:
     require_tool("osxphotos", "Install it with: uv tool install osxphotos")
     main_dir = main_archive()
-    return fix_export_names(main_dir, state_dir(), config.get("PHOTO_BACKER_UPPER_LIBRARY"), apply=args.apply)
+    return fix_export_names(
+        main_dir, state_dir(), config.get("PHOTO_BACKER_UPPER_LIBRARY"), apply=args.apply
+    )
 
 
 class SecondaryUnavailable(ConfigError):
@@ -251,45 +283,74 @@ def build_parser() -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("--dry-run", action="store_true", help="show what would happen")
         if delete:
-            sp.add_argument("--delete", action="store_true",
-                            help="also delete files from the secondary that are gone from main")
+            sp.add_argument(
+                "--delete",
+                action="store_true",
+                help="also delete files from the secondary that are gone from main",
+            )
         if notify_flag:
-            sp.add_argument("--notify", action="store_true",
-                            help="show a macOS notification if the run fails (used by the scheduled agent)")
+            sp.add_argument(
+                "--notify",
+                action="store_true",
+                help="show a macOS notification if the run fails (used by the scheduled agent)",
+            )
         sp.set_defaults(func=func)
         return sp
 
-    add("reconcile", cmd_reconcile, "one-time: mark library photos already in the archive so export skips them",
-        notify_flag=False)
+    add(
+        "reconcile",
+        cmd_reconcile,
+        "one-time: mark library photos already in the archive so export skips them",
+        notify_flag=False,
+    )
     fd = sub.add_parser("fix-dates", help="rename archive videos/photos to their real capture date")
     fd.add_argument("--apply", action="store_true", help="actually rename (default is report only)")
     fd.add_argument("--videos", action="store_true", help="only videos")
     fd.add_argument("--photos", action="store_true", help="only photos with camera-style names")
-    fd.add_argument("--include-other-names", action="store_true",
-                    help="also rename photos/videos with descriptive names (loses the description)")
+    fd.add_argument(
+        "--include-other-names",
+        action="store_true",
+        help="also rename photos/videos with descriptive names (loses the description)",
+    )
     fd.add_argument("--undo", metavar="LOG", help="reverse the renames recorded in a fix-dates log")
     fd.set_defaults(func=cmd_fix_dates)
 
-    fe = sub.add_parser("fix-export-names",
-                        help="rename files an earlier export named in UTC instead of local capture time")
+    fe = sub.add_parser(
+        "fix-export-names",
+        help="rename files an earlier export named in UTC instead of local capture time",
+    )
     fe.add_argument("--apply", action="store_true", help="actually rename (default is report only)")
     fe.set_defaults(func=cmd_fix_export_names)
 
     ex = add("export", cmd_export, "Photos library -> main archive")
-    ex.add_argument("--skip-reconcile-check", action="store_true",
-                    help="export even if reconcile hasn't been run against a non-empty archive")
-    ex.add_argument("--from-date", metavar="DATE", help="only items created on or after DATE (e.g. 2025-02-01)")
-    ex.add_argument("--to-date", metavar="DATE", help="only items created before DATE (e.g. 2025-03-01)")
+    ex.add_argument(
+        "--skip-reconcile-check",
+        action="store_true",
+        help="export even if reconcile hasn't been run against a non-empty archive",
+    )
+    ex.add_argument(
+        "--from-date", metavar="DATE", help="only items created on or after DATE (e.g. 2025-02-01)"
+    )
+    ex.add_argument(
+        "--to-date", metavar="DATE", help="only items created before DATE (e.g. 2025-03-01)"
+    )
 
     mi = add("mirror", cmd_mirror, "main archive -> secondary drive", delete=True)
-    mi.add_argument("--skip-space-check", action="store_true",
-                    help="don't refuse when the copy looks too big for the secondary drive")
+    mi.add_argument(
+        "--skip-space-check",
+        action="store_true",
+        help="don't refuse when the copy looks too big for the secondary drive",
+    )
 
     add("run", cmd_run, "export, then mirror if the secondary drive is attached")
 
-    ia = sub.add_parser("install-agent", help="install a launchd agent that runs `pback export` on a schedule")
+    ia = sub.add_parser(
+        "install-agent", help="install a launchd agent that runs `pback export` on a schedule"
+    )
     ia.add_argument("--every-hours", type=float, default=6, help="run interval (default 6)")
-    ia.add_argument("--load", action="store_true", help="also start it now (default: only write the plist)")
+    ia.add_argument(
+        "--load", action="store_true", help="also start it now (default: only write the plist)"
+    )
     ia.set_defaults(func=cmd_install_agent)
     ua = sub.add_parser("uninstall-agent", help="stop and remove the launchd agent")
     ua.set_defaults(func=cmd_uninstall_agent)
@@ -311,8 +372,11 @@ def main() -> None:
         hours = e.held_seconds / 3600
         if hours >= STUCK_HOURS and getattr(args, "notify", False):
             # Repeats every scheduled run, so a stuck run (even a manual one) isn't forgotten.
-            notify("pback", f"Another pback run has been going for {hours:.0f} hours and may be "
-                            "stuck; backups are waiting for it.")
+            notify(
+                "pback",
+                f"Another pback run has been going for {hours:.0f} hours and may be "
+                "stuck; backups are waiting for it.",
+            )
         sys.exit(0)
     except ConfigError as e:
         print(f"error: {e}", file=sys.stderr)
@@ -323,8 +387,10 @@ def main() -> None:
         # Anything unexpected (a failed osxphotos query, a network share dropping mid-run, a bad
         # database...) would otherwise only leave a traceback in a log nobody reads.
         if getattr(args, "notify", False):
-            notify("pback", f"{args.command} crashed ({type(e).__name__}); "
-                            "see the log in the state folder")
+            notify(
+                "pback",
+                f"{args.command} crashed ({type(e).__name__}); see the log in the state folder",
+            )
         raise
     if rc and getattr(args, "notify", False):
         notify("pback", f"{args.command} failed (exit {rc}); see the log in the state folder")

@@ -27,7 +27,7 @@ def _file_values() -> dict:
         if not line or line.startswith("#"):
             continue
         if line.startswith("export "):
-            line = line[len("export "):]
+            line = line[len("export ") :]
         key, sep, value = line.partition("=")
         if not sep:
             continue
