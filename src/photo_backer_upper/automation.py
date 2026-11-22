@@ -1,4 +1,4 @@
-"""Pieces for unattended runs: NAS auto-mount, run lock, notifications, launchd agent."""
+"""Pieces for unattended runs: network share auto-mount, run lock, notifications, launchd agent."""
 
 import fcntl
 import os
@@ -28,7 +28,7 @@ class LockBusy(Exception):
         self.held_seconds = held_seconds
 
 
-# --- NAS mount -------------------------------------------------------------------------
+# --- network share mount ---------------------------------------------------------------
 
 _DEFAULT_PORTS = {"smb": 445, "cifs": 445, "afp": 548, "nfs": 2049}
 NAS_WAIT_SECONDS = 120
@@ -47,7 +47,7 @@ def nas_endpoint(url: str) -> tuple[str, int] | None:
 
 
 def wait_for_nas(url: str, timeout: float = NAS_WAIT_SECONDS) -> bool:
-    """Wait until the NAS accepts connections, e.g. while the network comes up after boot.
+    """Wait until the share's server accepts connections, e.g. while the network comes up after boot.
 
     Returns True as soon as it answers, False if it never does within `timeout` seconds.
     Unparseable URLs return True so the mount call still gets a chance.
@@ -66,13 +66,13 @@ def wait_for_nas(url: str, timeout: float = NAS_WAIT_SECONDS) -> bool:
         if time.monotonic() >= deadline:
             return False
         if not announced:
-            print("NAS not reachable yet; waiting for the network...", flush=True)
+            print("Network share not reachable yet; waiting for the network...", flush=True)
             announced = True
         time.sleep(5)
 
 
 def ensure_nas_mounted(archive_dir: Path) -> None:
-    """If the archive folder is missing and a NAS URL is configured, try to mount it.
+    """If the archive folder is missing and a share URL is configured, try to mount it.
 
     Uses macOS's own mount call (same as Finder's Connect to Server), so credentials come
     from the login Keychain. The URL is never printed, since the logs may be shared.
@@ -84,19 +84,19 @@ def ensure_nas_mounted(archive_dir: Path) -> None:
         return  # the caller's mount check reports the problem
     if not wait_for_nas(url):
         # Don't call mount: it would pop up a "can't connect" dialog nobody is there to see.
-        print(f"NAS not reachable after {NAS_WAIT_SECONDS}s; skipping mount.", flush=True)
+        print(f"Network share not reachable after {NAS_WAIT_SECONDS}s; skipping mount.", flush=True)
         return
-    print("Archive not found; trying to mount the NAS...", flush=True)
+    print("Archive not found; trying to mount the network share...", flush=True)
     try:
         subprocess.run(
             ["osascript",
              "-e", "on run argv", "-e", "mount volume (item 1 of argv)", "-e", "end run", url],
             capture_output=True, text=True, timeout=90)
     except (subprocess.TimeoutExpired, OSError) as e:
-        print(f"NAS mount attempt failed: {type(e).__name__}", flush=True)
+        print(f"Network share mount attempt failed: {type(e).__name__}", flush=True)
     for _ in range(20):
         if archive_dir.is_dir():
-            print("NAS mounted.", flush=True)
+            print("Network share mounted.", flush=True)
             return
         time.sleep(1)
 

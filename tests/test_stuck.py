@@ -39,7 +39,7 @@ def test_main_notifies_on_crash_and_keeps_traceback(tmp_path, monkeypatch):
     notes = []
 
     def boom(args):
-        raise RuntimeError("NAS went away")
+        raise RuntimeError("network share went away")
 
     monkeypatch.setattr(cli, "state_dir", lambda: tmp_path)
     monkeypatch.setattr(cli, "notify", lambda t, m: notes.append(m))

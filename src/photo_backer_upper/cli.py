@@ -41,7 +41,7 @@ def require_mounted(path: Path, label: str) -> None:
 
 
 def main_archive() -> Path:
-    """The main archive folder, mounting the NAS first if a NAS URL is configured."""
+    """The main backup location, mounting its network share first if a share URL is configured."""
     main_dir = env_dir("PHOTO_BACKER_UPPER_MAIN_DIR")
     ensure_nas_mounted(main_dir)
     require_mounted(main_dir, "Main archive")
@@ -320,7 +320,7 @@ def main() -> None:
             notify("pback", f"Failed: {e}")
         sys.exit(2)
     except Exception as e:
-        # Anything unexpected (a failed osxphotos query, the NAS dropping mid-run, a bad
+        # Anything unexpected (a failed osxphotos query, a network share dropping mid-run, a bad
         # database...) would otherwise only leave a traceback in a log nobody reads.
         if getattr(args, "notify", False):
             notify("pback", f"{args.command} crashed ({type(e).__name__}); "

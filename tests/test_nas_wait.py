@@ -5,9 +5,9 @@ from photo_backer_upper.automation import nas_endpoint, wait_for_nas
 
 
 def test_nas_endpoint_defaults_and_explicit_port():
-    assert nas_endpoint("smb://joey@10.0.0.5/Family") == ("10.0.0.5", 445)
-    assert nas_endpoint("afp://nas.local/Share") == ("nas.local", 548)
-    assert nas_endpoint("smb://nas:1445/Share") == ("nas", 1445)
+    assert nas_endpoint("smb://user@10.0.0.5/Share") == ("10.0.0.5", 445)
+    assert nas_endpoint("afp://server.local/Share") == ("server.local", 548)
+    assert nas_endpoint("smb://server:1445/Share") == ("server", 1445)
     assert nas_endpoint("not a url") is None
 
 
