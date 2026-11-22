@@ -5,7 +5,8 @@ import time
 import pytest
 
 from photo_backer_upper import cli
-from photo_backer_upper.automation import LockBusy, run_lock
+from photo_backer_upper.errors import LockBusy
+from photo_backer_upper.lock import run_lock
 
 
 def test_busy_lock_reports_holder_age_and_keeps_its_pid(tmp_path):

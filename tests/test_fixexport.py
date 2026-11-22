@@ -14,7 +14,7 @@ from photo_backer_upper import fixdates, fixexport, library
 
 # --- Fakes and helpers. Every patch is here, so a later step retargets it in one place. ---
 
-# The module that runs `osxphotos query --json` (`library` after #13).
+# The module that runs `osxphotos query --json` (`library`).
 LIBRARY_QUERY_MODULE = library
 
 

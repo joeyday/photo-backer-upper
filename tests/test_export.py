@@ -9,13 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from photo_backer_upper import cli, config, naming
-from photo_backer_upper.automation import ConfigError
+from photo_backer_upper import cli, config, export, naming
+from photo_backer_upper.errors import ConfigError
 
 # --- Fakes and helpers. Every patch is here, so a later step retargets it in one place. ---
 
-# The module that defines cmd_export and the helpers it calls (`export` after #14).
-EXPORT_MODULE = cli
+# The module that defines cmd_export and the helpers it calls (`export`).
+EXPORT_MODULE = export
 
 
 @pytest.fixture

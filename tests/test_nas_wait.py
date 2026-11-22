@@ -1,7 +1,7 @@
 import socket
 
-from photo_backer_upper import automation
-from photo_backer_upper.automation import nas_endpoint, wait_for_nas
+from photo_backer_upper import mount
+from photo_backer_upper.mount import nas_endpoint, wait_for_nas
 
 
 def test_nas_endpoint_defaults_and_explicit_port():
@@ -26,6 +26,6 @@ def test_wait_for_nas_gives_up(monkeypatch):
     def refuse(*a, **k):
         raise OSError("no route")
 
-    monkeypatch.setattr(automation.socket, "create_connection", refuse)
-    monkeypatch.setattr(automation.time, "sleep", lambda s: None)
+    monkeypatch.setattr(mount.socket, "create_connection", refuse)
+    monkeypatch.setattr(mount.time, "sleep", lambda s: None)
     assert not wait_for_nas("smb://10.0.0.5/X", timeout=0)

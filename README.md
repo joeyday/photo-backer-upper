@@ -95,10 +95,17 @@ The schedule only exports to the main backup location. Copying to the secondary 
 
 | Piece | File | What it does |
 | --- | --- | --- |
-| Command line | `src/photo_backer_upper/cli.py` | Parses commands, builds the `osxphotos` and `rsync` command lines and runs them. |
+| Command line | `src/photo_backer_upper/cli.py` | Parses commands, takes the run lock and turns errors into exit codes. |
+| Export | `export.py` | Builds and runs the `osxphotos` export command, then reports files iCloud didn't provide. |
+| Mirror | `mirror.py` | Builds and runs the `rsync` command to the secondary drive, after checking it has room. |
+| Paths and tools | `paths.py` | Finds the archives and state folder, checks they are mounted and that tools are installed, runs commands. |
+| Errors | `errors.py` | The errors commands raise on purpose. |
+| Run lock | `lock.py` | Lets only one export or mirror run at a time. |
+| Network share | `mount.py` | Waits for the network and mounts the main archive's share. |
+| Notifications | `notify.py` | Shows macOS notifications. |
+| Launchd agent | `agent.py` | Installs and removes the scheduled launchd agent. |
 | Settings | `config.py` | Reads settings from the environment, then the config file. |
 | Naming | `naming.py` | Functions that osxphotos calls for each photo to get its folder and file name. |
-| Unattended runs | `automation.py` | Mounting a network share, the run lock, notifications, the free-space check, the launchd agent. |
 | Missing-file alerts | `alerts.py` | Finds files a run couldn't download from iCloud and decides when to notify. |
 | Unavailable Live Photo videos | `unavailable.py` | Keeps a list of Live Photos whose video iCloud doesn't deliver. |
 | Safe file writes | `atomic.py` | Replaces state files whole, so an interrupted write never leaves half a file. |

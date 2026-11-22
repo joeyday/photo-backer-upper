@@ -2,7 +2,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from photo_backer_upper import cli
+from photo_backer_upper import cli, export
 from photo_backer_upper.unavailable import (
     LIVE_UNAVAILABLE_FILE,
     RETRY_DAYS,
@@ -85,13 +85,13 @@ def test_cmd_export_runs_second_pass_with_skip_live(tmp_path, monkeypatch):
     (state / "skip-uuids.txt").write_text("S1\n")
     remember_live_unavailable(state, {"L1"})
     calls = []
-    monkeypatch.setattr(cli, "main_archive", lambda: archive)
-    monkeypatch.setattr(cli, "state_dir", lambda: state)
-    monkeypatch.setattr(cli, "require_tool", lambda *a: None)
-    monkeypatch.setattr(cli, "run_cmd", lambda cmd: calls.append(cmd) or 0)
-    monkeypatch.setattr(cli.config, "get", lambda *a, **k: None)
+    monkeypatch.setattr(export, "main_archive", lambda: archive)
+    monkeypatch.setattr(export, "state_dir", lambda: state)
+    monkeypatch.setattr(export, "require_tool", lambda *a: None)
+    monkeypatch.setattr(export, "run_cmd", lambda cmd: calls.append(cmd) or 0)
+    monkeypatch.setattr(export.config, "get", lambda *a, **k: None)
 
-    assert cli.cmd_export(cli.build_parser().parse_args(["export"])) == 0
+    assert export.cmd_export(cli.build_parser().parse_args(["export"])) == 0
 
     main, live = calls
     merged = main[main.index("--skip-uuid-from-file") + 1]
@@ -108,7 +108,7 @@ def test_cmd_export_fails_on_file_errors(tmp_path, monkeypatch, capsys):
     state = tmp_path / "state"
     state.mkdir()
     (state / "skip-uuids.txt").write_text("")
-    (state / cli.EXPORT_REPORT_FILE).write_text("stale report from an earlier run")
+    (state / export.EXPORT_REPORT_FILE).write_text("stale report from an earlier run")
 
     def fake_osxphotos(cmd):
         report = cmd[cmd.index("--report") + 1]
@@ -122,13 +122,13 @@ def test_cmd_export_fails_on_file_errors(tmp_path, monkeypatch, capsys):
         con.close()
         return 0  # osxphotos exits 0 even with file errors
 
-    monkeypatch.setattr(cli, "main_archive", lambda: archive)
-    monkeypatch.setattr(cli, "state_dir", lambda: state)
-    monkeypatch.setattr(cli, "require_tool", lambda *a: None)
-    monkeypatch.setattr(cli, "run_cmd", fake_osxphotos)
-    monkeypatch.setattr(cli.config, "get", lambda *a, **k: None)
+    monkeypatch.setattr(export, "main_archive", lambda: archive)
+    monkeypatch.setattr(export, "state_dir", lambda: state)
+    monkeypatch.setattr(export, "require_tool", lambda *a: None)
+    monkeypatch.setattr(export, "run_cmd", fake_osxphotos)
+    monkeypatch.setattr(export.config, "get", lambda *a, **k: None)
 
-    assert cli.cmd_export(cli.build_parser().parse_args(["export"])) == 1
+    assert export.cmd_export(cli.build_parser().parse_args(["export"])) == 1
     out = capsys.readouterr().out
     assert "EXPORT ERRORS: 1 file(s)" in out
     assert "/a/2025-01/bad.heic: disk full" in out
@@ -143,19 +143,19 @@ def test_cmd_export_reports_missing(tmp_path, monkeypatch, capsys):
     state.mkdir()
     (state / "skip-uuids.txt").write_text("")
     notes = []
-    monkeypatch.setattr(cli, "main_archive", lambda: archive)
-    monkeypatch.setattr(cli, "state_dir", lambda: state)
-    monkeypatch.setattr(cli, "require_tool", lambda *a: None)
-    monkeypatch.setattr(cli, "run_cmd", lambda cmd: 0)
-    monkeypatch.setattr(cli.config, "get", lambda *a, **k: None)
-    monkeypatch.setattr(cli, "missing_this_run", lambda db, since: ["2025-01/a.mov"])
-    monkeypatch.setattr(cli, "notify", lambda t, m: notes.append(m))
+    monkeypatch.setattr(export, "main_archive", lambda: archive)
+    monkeypatch.setattr(export, "state_dir", lambda: state)
+    monkeypatch.setattr(export, "require_tool", lambda *a: None)
+    monkeypatch.setattr(export, "run_cmd", lambda cmd: 0)
+    monkeypatch.setattr(export.config, "get", lambda *a, **k: None)
+    monkeypatch.setattr(export, "missing_this_run", lambda db, since: ["2025-01/a.mov"])
+    monkeypatch.setattr(export, "notify", lambda t, m: notes.append(m))
 
-    assert cli.cmd_export(cli.build_parser().parse_args(["export", "--notify"])) == 0
+    assert export.cmd_export(cli.build_parser().parse_args(["export", "--notify"])) == 0
     assert "NOT BACKED UP: 1 video" in capsys.readouterr().out
     assert notes == [
         "1 video couldn't be downloaded from iCloud and isn't backed up yet (retrying next run). "
         "See the export log for the file names."
     ]
-    cli.cmd_export(cli.build_parser().parse_args(["export", "--notify"]))
+    export.cmd_export(cli.build_parser().parse_args(["export", "--notify"]))
     assert len(notes) == 1  # not re-alerted the next run

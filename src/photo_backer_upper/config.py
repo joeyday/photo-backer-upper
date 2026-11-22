@@ -15,7 +15,8 @@ def config_path() -> Path:
     return Path(os.environ.get("PHOTO_BACKER_UPPER_CONFIG", default)).expanduser()
 
 
-def _file_values() -> dict:
+def file_values() -> dict:
+    """Settings from the config file only (what a launchd run sees)."""
     path = config_path()
     values = {}
     try:
@@ -38,13 +39,8 @@ def _file_values() -> dict:
     return values
 
 
-def file_values() -> dict:
-    """Settings from the config file only (what a launchd run sees)."""
-    return _file_values()
-
-
 def get(name: str, default=None):
     value = os.environ.get(name)
     if value:
         return value
-    return _file_values().get(name) or default
+    return file_values().get(name) or default
