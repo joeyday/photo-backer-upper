@@ -6,7 +6,7 @@ Either location can be any folder the Mac can write to: a folder on the Mac's ow
 
 pback is a thin layer over three existing tools: [osxphotos](https://github.com/RhetTbull/osxphotos) does the export, `exiftool` reads dates out of files already in the backup, and `rsync` does the copy to the secondary backup location.
 
-> Status: MVP in progress. See [BACKLOG.md](BACKLOG.md) for what's deferred.
+> Status: MVP in progress. See the [issues](https://github.com/joeyday/photo-backer-upper/issues) for what's deferred.
 
 ## Install (automatic backups on a Mac)
 
