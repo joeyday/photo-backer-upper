@@ -34,11 +34,12 @@ def run_export(cmd: list, report: Path) -> tuple[int, list]:
     return rc, export_errors(report)
 
 
-def cmd_export(args) -> int:
-    require_tool("osxphotos", "Install it with: uv tool install osxphotos")
-    main_dir = main_archive()
+def build_export_cmd(args, main_dir, export_db, skip_file, skip_uuids, live_unavailable) -> list:
+    """The osxphotos command for the main export.
 
-    export_db = state_dir() / EXPORT_DB_FILE
+    Writes the merged skip file when there is anything to skip, and refuses (ConfigError) to
+    export into an archive that already has files when no reconcile has been run on this Mac.
+    """
     # fmt: off
     cmd = [
         "osxphotos", "export", str(main_dir),
@@ -56,9 +57,6 @@ def cmd_export(args) -> int:
     library = config.get("PHOTO_BACKER_UPPER_LIBRARY")
     if library:
         cmd += ["--db", library]
-    skip_file = state_dir() / SKIP_FILE
-    skip_uuids = read_uuids(skip_file)
-    live_unavailable = load_live_unavailable(state_dir())
     if skip_file.exists() or live_unavailable:
         merged = write_merged_skip(state_dir(), skip_uuids, live_unavailable)
         cmd += ["--skip-uuid-from-file", str(merged)]
@@ -79,6 +77,57 @@ def cmd_export(args) -> int:
         cmd += ["--to-date", args.to_date]
     if args.dry_run:
         cmd.append("--dry-run")
+    return cmd
+
+
+def export_live_stills(cmd, skip_file, skip_uuids, live_unavailable, report) -> tuple[int, list]:
+    """The second pass: the Live Photos whose video iCloud never provides, with `--skip-live`.
+
+    `cmd` is the main export's command. Returns the same as run_export.
+    """
+    # Their stills still get updated; only the never-delivered video is left out, so
+    # osxphotos has nothing to download unless the photo itself changed.
+    print(
+        f"Exporting {len(live_unavailable)} Live Photos without their unavailable video...",
+        flush=True,
+    )
+    live_cmd = [c for c in cmd if c != "--verbose"]
+    i = live_cmd.index("--skip-uuid-from-file")
+    live_cmd[i : i + 2] = ["--skip-uuid-from-file", str(skip_file)] if skip_uuids else []
+    live_cmd += ["--uuid-from-file", str(state_dir() / LIVE_UNAVAILABLE_FILE), "--skip-live"]
+    return run_export(live_cmd, report)
+
+
+def remember_new_live_unavailable(export_db: Path, started: str) -> None:
+    """Add the Live Photo videos this run couldn't get to the list, and say how many were new."""
+    new = remember_live_unavailable(state_dir(), missing_live_uuids(export_db, started))
+    if new:
+        print(
+            f"{len(new)} Live Photo video(s) iCloud didn't provide; later runs won't "
+            "re-download those photos for them.",
+            flush=True,
+        )
+
+
+def report_errors(errors: list) -> int:
+    """List the files osxphotos failed to export; returns the run's exit status."""
+    if not errors:
+        return 0
+    # osxphotos exits 0 even when files fail, so fail the run here (which also notifies).
+    print(f"EXPORT ERRORS: {len(errors)} file(s) couldn't be exported:", flush=True)
+    for path, message in errors:
+        print(f"  {path}: {message}", flush=True)
+    return 1
+
+
+def cmd_export(args) -> int:
+    require_tool("osxphotos", "Install it with: uv tool install osxphotos")
+    main_dir = main_archive()
+    export_db = state_dir() / EXPORT_DB_FILE
+    skip_file = state_dir() / SKIP_FILE
+    skip_uuids = read_uuids(skip_file)
+    live_unavailable = load_live_unavailable(state_dir())
+    cmd = build_export_cmd(args, main_dir, export_db, skip_file, skip_uuids, live_unavailable)
 
     started = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     report = state_dir() / EXPORT_REPORT_FILE
@@ -86,36 +135,14 @@ def cmd_export(args) -> int:
     if rc != 0:
         return rc
     if live_unavailable:
-        # Their stills still get updated; only the never-delivered video is left out, so
-        # osxphotos has nothing to download unless the photo itself changed.
-        print(
-            f"Exporting {len(live_unavailable)} Live Photos without their unavailable video...",
-            flush=True,
-        )
-        live_cmd = [c for c in cmd if c != "--verbose"]
-        i = live_cmd.index("--skip-uuid-from-file")
-        live_cmd[i : i + 2] = ["--skip-uuid-from-file", str(skip_file)] if skip_uuids else []
-        live_cmd += ["--uuid-from-file", str(state_dir() / LIVE_UNAVAILABLE_FILE), "--skip-live"]
-        rc, live_errors = run_export(live_cmd, report)
+        rc, live_errors = export_live_stills(cmd, skip_file, skip_uuids, live_unavailable, report)
         if rc != 0:
             return rc
         errors += live_errors
     if not args.dry_run:
-        new = remember_live_unavailable(state_dir(), missing_live_uuids(export_db, started))
-        if new:
-            print(
-                f"{len(new)} Live Photo video(s) iCloud didn't provide; later runs won't "
-                "re-download those photos for them.",
-                flush=True,
-            )
+        remember_new_live_unavailable(export_db, started)
         report_missing(args, export_db, started)
-    if errors:
-        # osxphotos exits 0 even when files fail, so fail the run here (which also notifies).
-        print(f"EXPORT ERRORS: {len(errors)} file(s) couldn't be exported:", flush=True)
-        for path, message in errors:
-            print(f"  {path}: {message}", flush=True)
-        return 1
-    return 0
+    return report_errors(errors)
 
 
 def report_missing(args, export_db: Path, started: str) -> None:

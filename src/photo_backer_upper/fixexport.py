@@ -21,6 +21,7 @@ from .atomic import write_text_atomic
 from .library import load_library
 from .naming import TIMESTAMP_FMT, TIMESTAMP_PATTERN, choose
 from .reconcile import SKIP_FILE
+from .renames import Rename, undo_log
 
 NAME_RE = re.compile("^(" + TIMESTAMP_PATTERN + ")(.*)$")
 
@@ -38,6 +39,104 @@ def _taken(path: Path, planned: set) -> bool:
     return path.exists() or str(path).lower() in planned
 
 
+def free_name(folder: Path, base: str, ext: str, planned: set) -> Path:
+    """`base` + `ext` in `folder`, or the first ` (N)` variant not on disk and not planned."""
+    dst = folder / f"{base}{ext}"
+    n = 0
+    while _taken(dst, planned):
+        n += 1
+        dst = folder / f"{base} ({n}){ext}"
+    return dst
+
+
+def plan_row(main_dir: Path, uuid: str, rel: str, dates: dict, planned: set) -> Rename | str:
+    """Decide what to do with one exported file: a Rename, or the counter it falls under.
+
+    A Rename claims its new name in `planned`.
+    """
+    if uuid not in dates:
+        return "no library item"
+    date, original = dates[uuid]
+    old_base, new_dt = date.strftime(TIMESTAMP_FMT), choose(date, original)
+    new_base = new_dt.strftime(TIMESTAMP_FMT)
+    src = main_dir / unicodedata.normalize("NFC", rel)
+    m = NAME_RE.match(Path(rel).stem)
+    if not m or m.group(1) != old_base:
+        return "unexpected name"
+    if new_base == old_base:
+        return "already right"
+    if not src.exists():
+        return "file missing"
+    dst = free_name(main_dir / new_dt.strftime("%Y-%m"), new_base + m.group(2), src.suffix, planned)
+    planned.add(str(dst).lower())
+    return Rename(src, dst, uuid=uuid)
+
+
+def plan_renames(main_dir: Path, rows: list, dates: dict) -> tuple[list, dict]:
+    """The Renames, in export-database order, and how many files fall under each other counter."""
+    plan, planned = [], set()
+    other = {"already right": 0, "file missing": 0, "unexpected name": 0, "no library item": 0}
+    for uuid, rel in rows:
+        entry = plan_row(main_dir, uuid, rel, dates, planned)
+        if isinstance(entry, Rename):
+            plan.append(entry)
+        else:
+            other[entry] += 1
+    return plan, other
+
+
+def write_report(main_dir: Path, report: Path, plan: list) -> None:
+    report.write_text(
+        "".join(
+            f"{r.uuid}\t{r.old.relative_to(main_dir)}\t{r.new.relative_to(main_dir)}\n"
+            for r in plan
+        )
+    )
+
+
+def print_summary(rows: list, plan: list, other: dict, report: Path) -> None:
+    items = len({r.uuid for r in plan})
+    moved_month = sum(1 for r in plan if r.old.parent.name != r.new.parent.name)
+    print(f"Files recorded by earlier exports:      {len(rows)}")
+    print(f"  to rename (UTC name -> local time):   {len(plan)} files for {items} items")
+    print(f"    of which move to another month:     {moved_month}")
+    for k, v in other.items():
+        print(f"  {k + ':':38} {v}")
+    print(f"Plan written to {report}")
+
+
+def apply_renames(plan: list, log: Path) -> int:
+    """Rename the files, recording each in the undo log; returns how many were renamed.
+
+    A file whose size doesn't match after its rename gets a warning and no undo-log line.
+    """
+    done = 0
+    with undo_log(log) as record:
+        for r in plan:
+            if not r.old.exists() or r.new.exists():
+                continue  # changed since planning; never overwrite
+            r.new.parent.mkdir(parents=True, exist_ok=True)
+            size = r.old.stat().st_size
+            r.old.rename(r.new)
+            if not r.new.exists() or r.new.stat().st_size != size:
+                print(f"WARNING: check {r.new}")
+                continue
+            record(r)
+            done += 1
+    return done
+
+
+def add_to_skip_list(state_dir: Path, uuids: set) -> int:
+    """Add the UUIDs not already in the skip list; returns how many were added."""
+    skip = state_dir / SKIP_FILE
+    old_text = skip.read_text() if skip.exists() else ""
+    have = set(old_text.split())
+    if old_text and not old_text.endswith("\n"):
+        old_text += "\n"
+    write_text_atomic(skip, old_text + "".join(f"{u}\n" for u in sorted(uuids - have)))
+    return len(uuids - have)
+
+
 def fix_export_names(main_dir: Path, state_dir: Path, library=None, apply=False) -> int:
     db = state_dir / exportdb.EXPORT_DB_FILE
     if not db.exists():
@@ -47,77 +146,18 @@ def fix_export_names(main_dir: Path, state_dir: Path, library=None, apply=False)
         rows = exportdb.exported_files(con)
     dates = _lib_dates(library)
 
-    plan, planned, other = (
-        [],
-        set(),
-        {"already right": 0, "file missing": 0, "unexpected name": 0, "no library item": 0},
-    )
-    fixed_uuids = set()
-    for uuid, rel in rows:
-        if uuid not in dates:
-            other["no library item"] += 1
-            continue
-        date, original = dates[uuid]
-        old_base, new_dt = date.strftime(TIMESTAMP_FMT), choose(date, original)
-        new_base = new_dt.strftime(TIMESTAMP_FMT)
-        src = main_dir / unicodedata.normalize("NFC", rel)
-        m = NAME_RE.match(Path(rel).stem)
-        if not m or m.group(1) != old_base:
-            other["unexpected name"] += 1
-            continue
-        if new_base == old_base:
-            other["already right"] += 1
-            continue
-        if not src.exists():
-            other["file missing"] += 1
-            continue
-        folder = main_dir / new_dt.strftime("%Y-%m")
-        dst = folder / f"{new_base}{m.group(2)}{src.suffix}"
-        n = 0
-        while _taken(dst, planned):
-            n += 1
-            dst = folder / f"{new_base}{m.group(2)} ({n}){src.suffix}"
-        planned.add(str(dst).lower())
-        plan.append((uuid, src, dst))
-        fixed_uuids.add(uuid)
-
-    moved_month = sum(1 for _u, s, d in plan if s.parent.name != d.parent.name)
+    plan, other = plan_renames(main_dir, rows, dates)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     report = state_dir / f"fix-export-names-report-{stamp}.tsv"
-    report.write_text(
-        "".join(f"{u}\t{s.relative_to(main_dir)}\t{d.relative_to(main_dir)}\n" for u, s, d in plan)
-    )
-    print(f"Files recorded by earlier exports:      {len(rows)}")
-    print(f"  to rename (UTC name -> local time):   {len(plan)} files for {len(fixed_uuids)} items")
-    print(f"    of which move to another month:     {moved_month}")
-    for k, v in other.items():
-        print(f"  {k + ':':38} {v}")
-    print(f"Plan written to {report}")
+    write_report(main_dir, report, plan)
+    print_summary(rows, plan, other, report)
     if not apply:
         print("Report only; nothing renamed. Re-run with --apply.")
         return 0
 
-    undo_log = state_dir / f"fix-export-names-{stamp}.tsv"
-    done = 0
-    with open(undo_log, "a", encoding="utf-8") as log:
-        for _u, src, dst in plan:
-            if not src.exists() or dst.exists():
-                continue  # changed since planning; never overwrite
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            size = src.stat().st_size
-            src.rename(dst)
-            if not dst.exists() or dst.stat().st_size != size:
-                print(f"WARNING: check {dst}")
-                continue
-            log.write(f"{src}\t{dst}\n")
-            log.flush()
-            done += 1
-    skip = state_dir / SKIP_FILE
-    old_text = skip.read_text() if skip.exists() else ""
-    have = set(old_text.split())
-    if old_text and not old_text.endswith("\n"):
-        old_text += "\n"
-    write_text_atomic(skip, old_text + "".join(f"{u}\n" for u in sorted(fixed_uuids - have)))
-    print(f"Renamed {done} files. Undo log: {undo_log}")
-    print(f"Added {len(fixed_uuids - have)} items to the skip list so export leaves them alone.")
+    undo_path = state_dir / f"fix-export-names-{stamp}.tsv"
+    done = apply_renames(plan, undo_path)
+    added = add_to_skip_list(state_dir, {r.uuid for r in plan})
+    print(f"Renamed {done} files. Undo log: {undo_path}")
+    print(f"Added {added} items to the skip list so export leaves them alone.")
     return 0

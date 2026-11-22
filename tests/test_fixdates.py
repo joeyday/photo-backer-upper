@@ -559,6 +559,34 @@ def test_apply_never_overwrites_a_name_taken_after_planning(archive, state, exif
     assert clash.read_bytes() == b"one"
 
 
+def test_apply_skips_a_file_gone_since_planning(archive, state, exif, capsys):
+    # IMG_0002 is a symlink to IMG_0001: there at planning, but gone (dangling) once IMG_0001 has
+    # been renamed earlier in the same apply.
+    add_photo(archive, exif, "2025-06/IMG_0001.jpg", original="2025-06-02_08-00-00", data=b"one")
+    link = archive / "2025-06" / "IMG_0002.jpg"
+    link.symlink_to("IMG_0001.jpg")
+    exif[link] = {"DateTimeOriginal": "2025-06-03_09-00-00"}
+
+    out, rows = run_fix_dates(archive, state, capsys, apply=True)
+
+    assert [(old, new) for _k, _a, old, new, _why in rows] == [
+        ("2025-06/IMG_0001.jpg", "2025-06/2025-06-02_08-00-00.jpg"),
+        ("2025-06/IMG_0002.jpg", "2025-06/2025-06-03_09-00-00.jpg"),
+    ]
+    (log,) = undo_logs(state)
+    assert out.endswith(
+        f"Renamed 1 files. Undo log: {log}\n"
+        "Skipped 1 that changed since the scan (source gone or new name taken); "
+        "run fix-dates again for them:\n"
+        "  2025-06/IMG_0002.jpg\n"
+    )
+    assert log.read_text().splitlines() == [
+        f"{archive}/2025-06/IMG_0001.jpg\t{archive}/2025-06/2025-06-02_08-00-00.jpg"
+    ]
+    assert listing(archive) == ["2025-06/2025-06-02_08-00-00.jpg", "2025-06/IMG_0002.jpg"]
+    assert os.readlink(link) == "IMG_0001.jpg"
+
+
 def test_videos_only_and_photos_only(archive, state, exif, capsys):
     add_video(archive, exif, "2025-06/MVI_0001.mov", local="2025-06-01_10-00-00")
     add_photo(archive, exif, "2025-06/IMG_0002.jpg", original="2025-06-01_11-00-00")

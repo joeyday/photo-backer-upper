@@ -331,6 +331,32 @@ def test_apply_writes_an_undo_log_and_adds_new_uuids_to_the_skip_list(
     assert listing(archive) == before
 
 
+def test_apply_warns_when_a_renamed_file_does_not_check_out(archive, state, library, capsys):
+    # The exported file is a relative symlink. Moved to another month folder it points at a file
+    # of a different size there, so the size check after the rename fails.
+    library.items = [item(U1, "2025-07-01T03:00:00+00:00", "2025-06-30T20:00:00-07:00")]
+    make_export_db(state, [(U1, "2025-07/2025-07-01_03-00-00.heic")])
+    add_file(archive, "2025-07/target.heic", b"exported")
+    add_file(archive, "2025-06/target.heic", b"other")
+    (archive / "2025-07/2025-07-01_03-00-00.heic").symlink_to("target.heic")
+
+    out, rows = run_fix_export_names(archive, state, capsys, apply=True)
+
+    dst = archive / "2025-06/2025-06-30_20-00-00.heic"
+    assert rows == [(U1, "2025-07/2025-07-01_03-00-00.heic", "2025-06/2025-06-30_20-00-00.heic")]
+    (log,) = undo_logs(state)
+    assert out.endswith(
+        f"Plan written to {next(state.glob('fix-export-names-report-*.tsv'))}\n"
+        f"WARNING: check {dst}\n"
+        f"Renamed 0 files. Undo log: {log}\n"
+        "Added 1 items to the skip list so export leaves them alone.\n"
+    )
+    assert log.read_text() == ""
+    assert (state / "skip-uuids.txt").read_text() == f"{U1}\n"
+    assert dst.is_symlink()
+    assert not (archive / "2025-07/2025-07-01_03-00-00.heic").exists()
+
+
 def test_apply_with_nothing_to_rename_still_writes_undo_log_and_skip_list(
     archive, state, library, capsys
 ):

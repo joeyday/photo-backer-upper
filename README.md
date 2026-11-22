@@ -115,6 +115,7 @@ The schedule only exports to the main backup location. Copying to the secondary 
 | Reconcile | `reconcile.py` | One-time: works out which library photos are already in the backup. |
 | Fix dates | `fixdates.py` | One-time: renames files in the backup to their embedded capture date. |
 | Fix export names | `fixexport.py` | One-time: renames files an earlier version of export named in UTC. |
+| Renames | `renames.py` | What fix dates and fix export names share: a planned rename, and the undo log every rename is written to. |
 | Launcher | `launcher/PhotoBackerUpper.swift` | The app launchd runs. Checks Photos access, then starts `pback`. |
 
 The Python package has no dependencies beyond the standard library. It needs Python 3.10 or newer. `osxphotos`, `exiftool` and `rsync` are run as separate programs and must be on `PATH`.
