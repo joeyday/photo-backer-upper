@@ -54,9 +54,9 @@ def candidate_stems(photo: dict) -> list:
     stems = []
     for key in ("date_original", "date"):
         if photo.get(key):
-            s = datetime.fromisoformat(photo[key]).strftime(TIMESTAMP_FMT)
-            if s not in stems:
-                stems.append(s)
+            stem = datetime.fromisoformat(photo[key]).strftime(TIMESTAMP_FMT)
+            if stem not in stems:
+                stems.append(stem)
     return stems
 
 
@@ -65,16 +65,25 @@ def read_archive_metadata(paths: list) -> dict:
     meta = {}
     for i in range(0, len(paths), BATCH):
         chunk = paths[i : i + BATCH]
-        with tempfile.NamedTemporaryFile("w", suffix=".args", encoding="utf-8") as af:
-            af.write("".join(f"{p}\n" for p in chunk))
-            af.flush()
+        with tempfile.NamedTemporaryFile("w", suffix=".args", encoding="utf-8") as args_file:
+            args_file.write("".join(f"{p}\n" for p in chunk))
+            args_file.flush()
             out = subprocess.run(
-                ["exiftool", "-j", "-n", "-charset", "filename=utf8", *EXIF_TAGS, "-@", af.name],
+                [
+                    "exiftool",
+                    "-j",
+                    "-n",
+                    "-charset",
+                    "filename=utf8",
+                    *EXIF_TAGS,
+                    "-@",
+                    args_file.name,
+                ],
                 capture_output=True,
                 text=True,
             ).stdout
-        for d in json.loads(out or "[]"):
-            meta[Path(d["SourceFile"])] = d
+        for row in json.loads(out or "[]"):
+            meta[Path(row["SourceFile"])] = row
         print(
             f"  read metadata for {min(i + BATCH, len(paths))}/{len(paths)} archive files",
             flush=True,
@@ -103,16 +112,25 @@ def compare(photo: dict, meta: dict):
     if lib_frac and arc_frac and not (lib_frac == "00" and arc_frac == "00"):
         (agree if lib_frac == arc_frac else differ).add("subsec")
 
-    lw, lh = photo.get("original_width"), photo.get("original_height")
-    aw, ah = meta.get("ImageWidth"), meta.get("ImageHeight")
-    if lw and lh and aw and ah:
-        r1, r2 = max(lw, lh) / min(lw, lh), max(aw, ah) / min(aw, ah)
-        (agree if abs(r1 - r2) / r1 < 0.02 else differ).add("aspect")
+    library_width, library_height = photo.get("original_width"), photo.get("original_height")
+    archive_width, archive_height = meta.get("ImageWidth"), meta.get("ImageHeight")
+    if library_width and library_height and archive_width and archive_height:
+        library_ratio, archive_ratio = (
+            max(library_width, library_height) / min(library_width, library_height),
+            max(archive_width, archive_height) / min(archive_width, archive_height),
+        )
+        (agree if abs(library_ratio - archive_ratio) / library_ratio < 0.02 else differ).add(
+            "aspect"
+        )
 
     if photo.get("ismovie"):
-        ld, ad = photo.get("duration"), meta.get("Duration")
-        if ld and ad:
-            (agree if abs(ld - ad) <= max(1.5, 0.03 * ld) else differ).add("duration")
+        library_duration, archive_duration = photo.get("duration"), meta.get("Duration")
+        if library_duration and archive_duration:
+            (
+                agree
+                if abs(library_duration - archive_duration) <= max(1.5, 0.03 * library_duration)
+                else differ
+            ).add("duration")
     return agree, differ
 
 
@@ -138,14 +156,14 @@ def reconcile(main_dir: Path, state_dir: Path, library: str = None, dry_run: boo
     photos = load_library(library)
 
     candidates = {}
-    for p in photos:
+    for photo in photos:
         seen, files = set(), []
-        for s in candidate_stems(p):
-            for f in archive.get(s, []):
-                if f not in seen:
-                    seen.add(f)
-                    files.append(f)
-        candidates[p["uuid"]] = files
+        for stem in candidate_stems(photo):
+            for archive_file in archive.get(stem, []):
+                if archive_file not in seen:
+                    seen.add(archive_file)
+                    files.append(archive_file)
+        candidates[photo["uuid"]] = files
 
     needed = sorted({f for files in candidates.values() for f in files})
     print(
@@ -158,19 +176,19 @@ def reconcile(main_dir: Path, state_dir: Path, library: str = None, dry_run: boo
     # Each archive file can vouch for only one library item. Items with the fewest
     # candidates go first so bursts and duplicates sort out predictably.
     claimed, skip, unconfirmed, not_in_archive = set(), [], [], []
-    for p in sorted(photos, key=lambda p: (len(candidates[p["uuid"]]), p["uuid"])):
-        files = candidates[p["uuid"]]
+    for photo in sorted(photos, key=lambda p: (len(candidates[p["uuid"]]), p["uuid"])):
+        files = candidates[photo["uuid"]]
         if not files:
-            not_in_archive.append(p)
+            not_in_archive.append(photo)
             continue
         match = next(
-            (f for f in files if f not in claimed and same_photo(p, meta.get(f, {}))), None
+            (f for f in files if f not in claimed and same_photo(photo, meta.get(f, {}))), None
         )
         if match:
             claimed.add(match)
-            skip.append(p)
+            skip.append(photo)
         else:
-            unconfirmed.append((p, files))
+            unconfirmed.append((photo, files))
 
     videos_new = [p for p in not_in_archive if p.get("ismovie")]
     print(f"Archive files with date-stamped names: {sum(len(v) for v in archive.values())}")
@@ -182,9 +200,10 @@ def reconcile(main_dir: Path, state_dir: Path, library: str = None, dry_run: boo
 
     report = state_dir / UNCONFIRMED_FILE
     if dry_run:
-        for p, files in unconfirmed[:5]:
+        for photo, files in unconfirmed[:5]:
             print(
-                f"    e.g. {p.get('original_filename')} {p.get('date_original')} vs {files[0].name}"
+                f"    e.g. {photo.get('original_filename')} {photo.get('date_original')} "
+                f"vs {files[0].name}"
             )
         print("Dry run: skip list and report not written.")
         return 0

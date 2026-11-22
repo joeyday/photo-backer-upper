@@ -23,10 +23,10 @@ REALERT_DAYS = 7
 
 
 def _is_ignored(path: str, stills: set[str], uuid: str) -> bool:
-    p = PurePosixPath(path.lower())
-    if p.suffix == ".aae":
+    posix_path = PurePosixPath(path.lower())
+    if posix_path.suffix == ".aae":
         return True
-    return p.suffix == ".mov" and p.stem.endswith("_edited") and uuid in stills
+    return posix_path.suffix == ".mov" and posix_path.stem.endswith("_edited") and uuid in stills
 
 
 def missing_this_run(export_db: Path, since_utc: str) -> list[str]:

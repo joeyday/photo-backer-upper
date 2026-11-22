@@ -76,12 +76,12 @@ def cmd_uninstall_agent(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="pback", description=__doc__)
-    sub = p.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(prog="pback", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
     # Defaults for flags that only some commands define, so the code can read them from any
     # command's arguments (`run` passes its arguments to both export and mirror). A command that
     # defines the flag overrides its default.
-    p.set_defaults(
+    parser.set_defaults(
         notify=False,
         skip_reconcile_check=False,
         from_date=None,
@@ -91,22 +91,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     def add(name, func, help_, delete=False, notify_flag=True):
-        sp = sub.add_parser(name, help=help_)
-        sp.add_argument("--dry-run", action="store_true", help="show what would happen")
+        subparser = sub.add_parser(name, help=help_)
+        subparser.add_argument("--dry-run", action="store_true", help="show what would happen")
         if delete:
-            sp.add_argument(
+            subparser.add_argument(
                 "--delete",
                 action="store_true",
                 help="also delete files from the secondary that are gone from main",
             )
         if notify_flag:
-            sp.add_argument(
+            subparser.add_argument(
                 "--notify",
                 action="store_true",
                 help="show a macOS notification if the run fails (used by the scheduled agent)",
             )
-        sp.set_defaults(func=func)
-        return sp
+        subparser.set_defaults(func=func)
+        return subparser
 
     add(
         "reconcile",
@@ -114,40 +114,50 @@ def build_parser() -> argparse.ArgumentParser:
         "one-time: mark library photos already in the archive so export skips them",
         notify_flag=False,
     )
-    fd = sub.add_parser("fix-dates", help="rename archive videos/photos to their real capture date")
-    fd.add_argument("--apply", action="store_true", help="actually rename (default is report only)")
-    fd.add_argument("--videos", action="store_true", help="only videos")
-    fd.add_argument("--photos", action="store_true", help="only photos with camera-style names")
-    fd.add_argument(
+    fix_dates_parser = sub.add_parser(
+        "fix-dates", help="rename archive videos/photos to their real capture date"
+    )
+    fix_dates_parser.add_argument(
+        "--apply", action="store_true", help="actually rename (default is report only)"
+    )
+    fix_dates_parser.add_argument("--videos", action="store_true", help="only videos")
+    fix_dates_parser.add_argument(
+        "--photos", action="store_true", help="only photos with camera-style names"
+    )
+    fix_dates_parser.add_argument(
         "--include-other-names",
         action="store_true",
         help="also rename photos/videos with descriptive names (loses the description)",
     )
-    fd.add_argument("--undo", metavar="LOG", help="reverse the renames recorded in a fix-dates log")
-    fd.set_defaults(func=cmd_fix_dates)
+    fix_dates_parser.add_argument(
+        "--undo", metavar="LOG", help="reverse the renames recorded in a fix-dates log"
+    )
+    fix_dates_parser.set_defaults(func=cmd_fix_dates)
 
-    fe = sub.add_parser(
+    fix_export_names_parser = sub.add_parser(
         "fix-export-names",
         help="rename files an earlier export named in UTC instead of local capture time",
     )
-    fe.add_argument("--apply", action="store_true", help="actually rename (default is report only)")
-    fe.set_defaults(func=cmd_fix_export_names)
+    fix_export_names_parser.add_argument(
+        "--apply", action="store_true", help="actually rename (default is report only)"
+    )
+    fix_export_names_parser.set_defaults(func=cmd_fix_export_names)
 
-    ex = add("export", cmd_export, "Photos library -> main archive")
-    ex.add_argument(
+    export_parser = add("export", cmd_export, "Photos library -> main archive")
+    export_parser.add_argument(
         "--skip-reconcile-check",
         action="store_true",
         help="export even if reconcile hasn't been run against a non-empty archive",
     )
-    ex.add_argument(
+    export_parser.add_argument(
         "--from-date", metavar="DATE", help="only items created on or after DATE (e.g. 2025-02-01)"
     )
-    ex.add_argument(
+    export_parser.add_argument(
         "--to-date", metavar="DATE", help="only items created before DATE (e.g. 2025-03-01)"
     )
 
-    mi = add("mirror", cmd_mirror, "main archive -> secondary drive", delete=True)
-    mi.add_argument(
+    mirror_parser = add("mirror", cmd_mirror, "main archive -> secondary drive", delete=True)
+    mirror_parser.add_argument(
         "--skip-space-check",
         action="store_true",
         help="don't refuse when the copy looks too big for the secondary drive",
@@ -155,17 +165,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     add("run", cmd_run, "export, then mirror if the secondary drive is attached")
 
-    ia = sub.add_parser(
+    install_agent_parser = sub.add_parser(
         "install-agent", help="install a launchd agent that runs `pback export` on a schedule"
     )
-    ia.add_argument("--every-hours", type=float, default=6, help="run interval (default 6)")
-    ia.add_argument(
+    install_agent_parser.add_argument(
+        "--every-hours", type=float, default=6, help="run interval (default 6)"
+    )
+    install_agent_parser.add_argument(
         "--load", action="store_true", help="also start it now (default: only write the plist)"
     )
-    ia.set_defaults(func=cmd_install_agent)
-    ua = sub.add_parser("uninstall-agent", help="stop and remove the launchd agent")
-    ua.set_defaults(func=cmd_uninstall_agent)
-    return p
+    install_agent_parser.set_defaults(func=cmd_install_agent)
+    uninstall_agent_parser = sub.add_parser(
+        "uninstall-agent", help="stop and remove the launchd agent"
+    )
+    uninstall_agent_parser.set_defaults(func=cmd_uninstall_agent)
+    return parser
 
 
 def main() -> None:

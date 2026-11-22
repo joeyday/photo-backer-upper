@@ -139,16 +139,16 @@ class Duplicate:
     existing: Path
 
 
-def name_skip_reason(main_dir: Path, path: Path, cls: str, kind: str) -> str | None:
+def name_skip_reason(main_dir: Path, path: Path, name_kind: str, kind: str) -> str | None:
     """Why a file is left alone because of its name or place, or None if it may be renamed."""
     is_mod = path.name.startswith("mod_")
     if path.parent == main_dir:
         return "loose at archive root (left alone)"
     if is_mod and not DATE_NAME_RE.match(path.stem):
         return "unrecognized mod_ name"
-    if cls == "other":
+    if name_kind == "other":
         return "descriptive name (left alone)"
-    if kind == "photo" and cls == "date" and not is_mod:
+    if kind == "photo" and name_kind == "date" and not is_mod:
         return "photo already date-named"
     if kind == "photo" and is_mod:
         return "mod_ image"
@@ -198,8 +198,8 @@ def plan_file(main_dir, path, row, kind, include_other, taken) -> str | Rename |
 
     A Rename claims its new name in `taken` (path -> size).
     """
-    cls = classify_name(path, include_other)
-    reason = name_skip_reason(main_dir, path, cls, kind)
+    name_kind = classify_name(path, include_other)
+    reason = name_skip_reason(main_dir, path, name_kind, kind)
     if reason:
         return reason
     stamp, reason = embedded_stamp(row, kind)
@@ -235,13 +235,13 @@ def plan_files(main_dir, paths, info, kind, include_other, taken, plan, skipped)
 def photos_to_read(main_dir: Path, include_other: bool, skipped: Counter) -> list:
     """The photos worth reading metadata for; date-named and mod_ ones are counted as skipped."""
     imgs = []
-    for p in scan(main_dir, False, True):
-        if p.name.startswith("mod_"):
+    for path in scan(main_dir, False, True):
+        if path.name.startswith("mod_"):
             skipped["mod_ image"] += 1
-        elif classify_name(p, include_other) == "date":
+        elif classify_name(path, include_other) == "date":
             skipped["photo already date-named"] += 1
         else:
-            imgs.append(p)
+            imgs.append(path)
     return imgs
 
 
@@ -297,8 +297,11 @@ def print_summary(main_dir: Path, renames: list, skipped: Counter, report: Path)
     for reason, n in skipped.most_common():
         print(f"  {n:>7}  {reason}")
     print("Samples:")
-    for r in renames[:5] + renames[5:][-5:]:
-        print(f"  {r.old.relative_to(main_dir)} -> {r.new.relative_to(main_dir)}  [{r.reason}]")
+    for rename in renames[:5] + renames[5:][-5:]:
+        print(
+            f"  {rename.old.relative_to(main_dir)} -> {rename.new.relative_to(main_dir)}  "
+            f"[{rename.reason}]"
+        )
     print(f"Full plan: {report}")
 
 
@@ -307,14 +310,14 @@ def apply_renames(renames: list, log: Path) -> tuple[int, list]:
     old paths of those skipped because they changed since the scan."""
     done, changed = 0, []
     with undo_log(log) as record:
-        for r in renames:
+        for rename in renames:
             # The plan may be stale (the scan can take a long time): never overwrite.
-            if not r.old.exists() or r.new.exists():
-                changed.append(r.old)
+            if not rename.old.exists() or rename.new.exists():
+                changed.append(rename.old)
                 continue
-            r.new.parent.mkdir(parents=True, exist_ok=True)
-            os.rename(r.old, r.new)
-            record(r)
+            rename.new.parent.mkdir(parents=True, exist_ok=True)
+            os.rename(rename.old, rename.new)
+            record(rename)
             done += 1
     return done, changed
 

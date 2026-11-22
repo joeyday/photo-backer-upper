@@ -28,10 +28,14 @@ NAME_RE = re.compile("^(" + TIMESTAMP_PATTERN + ")(.*)$")
 
 def _lib_dates(library):
     dates = {}
-    for p in load_library(library):
-        if p.get("date"):
-            o = datetime.fromisoformat(p["date_original"]) if p.get("date_original") else None
-            dates[p["uuid"]] = (datetime.fromisoformat(p["date"]), o)
+    for photo in load_library(library):
+        if photo.get("date"):
+            original = (
+                datetime.fromisoformat(photo["date_original"])
+                if photo.get("date_original")
+                else None
+            )
+            dates[photo["uuid"]] = (datetime.fromisoformat(photo["date"]), original)
     return dates
 
 
@@ -100,8 +104,8 @@ def print_summary(rows: list, plan: list, other: dict, report: Path) -> None:
     print(f"Files recorded by earlier exports:      {len(rows)}")
     print(f"  to rename (UTC name -> local time):   {len(plan)} files for {items} items")
     print(f"    of which move to another month:     {moved_month}")
-    for k, v in other.items():
-        print(f"  {k + ':':38} {v}")
+    for label, count in other.items():
+        print(f"  {label + ':':38} {count}")
     print(f"Plan written to {report}")
 
 
@@ -112,16 +116,16 @@ def apply_renames(plan: list, log: Path) -> int:
     """
     done = 0
     with undo_log(log) as record:
-        for r in plan:
-            if not r.old.exists() or r.new.exists():
+        for rename in plan:
+            if not rename.old.exists() or rename.new.exists():
                 continue  # changed since planning; never overwrite
-            r.new.parent.mkdir(parents=True, exist_ok=True)
-            size = r.old.stat().st_size
-            r.old.rename(r.new)
-            if not r.new.exists() or r.new.stat().st_size != size:
-                print(f"WARNING: check {r.new}")
+            rename.new.parent.mkdir(parents=True, exist_ok=True)
+            size = rename.old.stat().st_size
+            rename.old.rename(rename.new)
+            if not rename.new.exists() or rename.new.stat().st_size != size:
+                print(f"WARNING: check {rename.new}")
                 continue
-            record(r)
+            record(rename)
             done += 1
     return done
 
@@ -138,11 +142,11 @@ def add_to_skip_list(state_dir: Path, uuids: set) -> int:
 
 
 def fix_export_names(main_dir: Path, state_dir: Path, library=None, apply=False) -> int:
-    db = state_dir / exportdb.EXPORT_DB_FILE
-    if not db.exists():
+    db_path = state_dir / exportdb.EXPORT_DB_FILE
+    if not db_path.exists():
         print("No export database found; nothing to do.")
         return 0
-    with exportdb.connect(db) as con:
+    with exportdb.connect(db_path) as con:
         rows = exportdb.exported_files(con)
     dates = _lib_dates(library)
 
